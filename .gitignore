@@ -1,0 +1,15 @@
+# секреты и личные данные
+server/.env
+server/data/
+data/
+server/config/campaign.json
+server/config/speakers.json
+server/config/ignore.json
+# окружение и сборка
+server/.venv/
+__pycache__/
+server/dist/
+server/build/
+node_modules/
+*.tmp
+# прод-билд собирается в соседнюю папку, в репозиторий не попадает

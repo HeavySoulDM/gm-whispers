@@ -1,0 +1,33 @@
+{
+  "id": "gm-whispers",
+  "title": "GM Whispers",
+  "description": "ИИ-помощник мастера: советник по приключению и правилам со ссылками на страницы, тактика по карте, итоги сессии в дневник, расшифровка записей Craig. Только у мастера; нужен локальный сервер GM Whispers Core.",
+  "version": "0.3.0",
+  "authors": [
+    {
+      "name": "Di"
+    }
+  ],
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "styles": [
+    "styles/gm-whispers.css"
+  ],
+  "languages": [
+    {
+      "lang": "ru",
+      "name": "Русский",
+      "path": "lang/ru.json"
+    },
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ]
+}

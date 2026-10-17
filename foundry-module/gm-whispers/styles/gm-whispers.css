@@ -1,0 +1,236 @@
+/* GM Whispers — панель советника */
+
+.gm-whispers {
+  --gmw-accent: #b9a46a;
+  --gmw-ok: #5fae6e;
+  --gmw-warn: #d8a440;
+  --gmw-bad: #c75b4f;
+  --gmw-line: rgba(255, 255, 255, 0.10);
+  --gmw-soft: rgba(255, 255, 255, 0.04);
+  --gmw-muted: rgba(230, 225, 210, 0.62);
+}
+
+.gm-whispers .window-content { padding: 0; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+
+.gm-whispers .gmw-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  font-size: var(--font-size-14, 14px);
+}
+
+.gm-whispers .gmw-status {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  grid-template-areas: "dot text" "actions actions";
+  column-gap: 8px;
+  row-gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--gmw-line);
+}
+.gm-whispers .gmw-status .gmw-dot { grid-area: dot; }
+.gm-whispers .gmw-status-text { grid-area: text; min-width: 0; line-height: 1.25; }
+.gm-whispers .gmw-status-text > div:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gm-whispers .gmw-kb { font-size: 0.85em; color: var(--gmw-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gm-whispers .gmw-kb[title] { cursor: help; }
+.gm-whispers .gmw-actions { grid-area: actions; display: flex; flex-wrap: wrap; gap: 4px; }
+.gm-whispers .gmw-actions button { flex: 0 0 auto; width: auto; padding: 0 8px; height: 26px; white-space: nowrap; }
+.gm-whispers .gmw-actions .gmw-spacer { flex: 1; }
+.gm-whispers .gmw-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 10px; background: var(--gmw-muted); }
+.gm-whispers .gmw-dot.gmw-ok { background: var(--gmw-ok); }
+.gm-whispers .gmw-dot.gmw-warn { background: var(--gmw-warn); }
+.gm-whispers .gmw-dot.gmw-bad { background: var(--gmw-bad); }
+
+.gm-whispers .gmw-feed {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gm-whispers .gmw-empty { color: var(--gmw-muted); display: flex; flex-direction: column; gap: 6px; }
+.gm-whispers .gmw-example {
+  display: block;
+  padding: 6px 8px;
+  border: 1px dashed var(--gmw-line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.gm-whispers .gmw-example:hover { border-color: var(--gmw-accent); color: inherit; }
+
+.gm-whispers .gmw-item { flex: 0 0 auto; border: 1px solid var(--gmw-line); border-radius: 8px; background: var(--gmw-soft); overflow: hidden; }
+.gm-whispers .gmw-q {
+  padding: 7px 10px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--gmw-line);
+  border-left: 3px solid var(--gmw-accent);
+}
+.gm-whispers .gmw-a, .gm-whispers .gmw-pending, .gm-whispers .gmw-error { padding: 8px 10px; line-height: 1.45; }
+.gm-whispers .gmw-a p { margin: 0 0 0.6em; }
+.gm-whispers .gmw-a p:last-child { margin-bottom: 0; }
+.gm-whispers .gmw-a h4 { margin: 0.6em 0 0.3em; font-size: 1em; border: none; color: var(--gmw-accent); }
+.gm-whispers .gmw-a ul, .gm-whispers .gmw-a ol { margin: 0.2em 0 0.6em; padding-left: 1.3em; }
+.gm-whispers .gmw-pending { color: var(--gmw-muted); }
+.gm-whispers .gmw-error { color: var(--gmw-bad); }
+
+.gm-whispers .gmw-ref {
+  display: inline-block;
+  min-width: 1.35em;
+  padding: 0 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  font-size: 0.78em;
+  line-height: 1.35em;
+  text-align: center;
+  vertical-align: 0.15em;
+  background: rgba(185, 164, 106, 0.22);
+  color: inherit;
+  cursor: pointer;
+}
+.gm-whispers .gmw-ref:hover { background: rgba(185, 164, 106, 0.45); }
+
+.gm-whispers .gmw-cites { margin: 0; padding: 6px 10px 6px 2em; border-top: 1px solid var(--gmw-line); font-size: 0.86em; }
+.gm-whispers .gmw-cites li { margin: 2px 0; }
+.gm-whispers .gmw-cites a { cursor: pointer; }
+.gm-whispers .gmw-src { color: var(--gmw-muted); }
+
+.gm-whispers .gmw-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px 6px;
+  font-size: 0.78em;
+  color: var(--gmw-muted);
+}
+.gm-whispers .gmw-meta a { cursor: pointer; }
+
+.gm-whispers .gmw-input { flex: 0 0 auto; border-top: 1px solid var(--gmw-line); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.gm-whispers .gmw-input textarea { resize: vertical; min-height: 54px; font-size: 1em; }
+.gm-whispers .gmw-row { display: flex; align-items: center; gap: 6px; }
+.gm-whispers .gmw-row label { flex: 0 1 auto; display: flex; align-items: center; gap: 4px; font-size: 0.88em; color: var(--gmw-muted); }
+.gm-whispers .gmw-row label + button { margin-left: auto; }
+.gm-whispers .gmw-row button { flex: 0 0 auto; width: auto; padding: 0 10px; height: 30px; }
+.gm-whispers .gmw-send { border-color: var(--gmw-accent); }
+
+.gm-whispers .gmw-journal { padding: 2px 10px 6px; font-size: 0.9em; }
+.gm-whispers .gmw-journal a { cursor: pointer; color: var(--gmw-accent); }
+
+.gmw-dialog { display: flex; flex-direction: column; gap: 10px; }
+.gmw-dialog label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
+.gmw-dialog select, .gmw-dialog textarea, .gmw-dialog input[type=file] { font-weight: normal; width: 100%; }
+.gmw-dialog textarea { resize: vertical; min-height: 120px; }
+.gmw-dialog .hint { margin: 0; font-size: 0.85em; opacity: 0.75; }
+.gmw-dialog label.gmw-check { flex-direction: row; align-items: center; gap: 6px; font-weight: normal; }
+
+/* Прогресс длинных операций (расшифровка Craig, итоги) */
+.gm-whispers .gmw-bar {
+  height: 6px;
+  margin: 7px 0 4px;
+  border-radius: 3px;
+  background: rgba(127, 127, 127, 0.25);
+  overflow: hidden;
+}
+.gm-whispers .gmw-bar > div {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--gmw-accent);
+  transition: width 0.6s ease;
+}
+.gm-whispers .gmw-bar-ind > div {
+  width: 30%;
+  animation: gmw-indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes gmw-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(340%); }
+}
+.gm-whispers .gmw-progress-meta { font-size: 0.9em; }
+.gm-whispers .gmw-ago { color: var(--gmw-bad); }
+
+/* Окно «Настройки сервера» */
+.gmw-settings .window-content { overflow-y: auto; }
+.gmw-settings-root { --gmw-gap: 14px; }
+.gmw-settings-root fieldset { margin: 0 0 10px; padding: 8px 12px 10px; border: 1px solid rgba(127, 127, 127, 0.35); border-radius: 6px; min-width: 0; }
+.gmw-settings-root legend { padding: 0 6px; font-weight: 600; color: var(--gmw-accent); }
+.gmw-settings-root .hint { margin: 4px 0 0; font-size: 0.86em; color: var(--gmw-muted); line-height: 1.35; }
+.gmw-settings-root .gmw-legend-hint { margin: -4px 2px 8px; }
+.gmw-settings-root .gmw-inline-hint { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.gmw-settings-root .gmw-inline-hint button { width: auto; flex: 0 0 auto; }
+/* Поле = три строки сетки (подпись / ввод / подсказка): в соседних колонках они выравниваются построчно. */
+.gmw-settings-root .gmw-field { display: grid; grid-template-rows: auto auto 1fr; margin: 6px 0; min-width: 0; }
+.gmw-settings-root .gmw-field > label { display: block; font-weight: 600; margin-bottom: 3px; }
+.gmw-settings-root .gmw-grid { display: grid; column-gap: var(--gmw-gap); row-gap: 0; align-items: stretch; }
+.gmw-settings-root .gmw-grid > .gmw-field { grid-template-rows: subgrid; grid-row: span 3; }
+.gmw-settings-root .gmw-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.gmw-settings-root .gmw-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.gmw-settings-root input[type="text"], .gmw-settings-root input[type="password"], .gmw-settings-root input[type="number"], .gmw-settings-root select { width: 100%; min-width: 0; box-sizing: border-box; height: 28px; }
+.gmw-settings-root .gmw-inline { display: flex; gap: 6px; align-items: center; }
+.gmw-settings-root .gmw-inline input { flex: 1; }
+.gmw-settings-root .gmw-inline button { flex: 0 0 auto; width: auto; height: 28px; white-space: nowrap; }
+.gmw-settings-root .gmw-key-state { font-weight: 400; }
+.gmw-settings-root .gmw-ok { color: #6fae5a; }
+.gmw-settings-root .gmw-bad { color: var(--gmw-bad); }
+.gmw-settings-root .gmw-muted { color: var(--gmw-muted); }
+.gmw-settings-root .gmw-key-result { color: var(--gmw-accent); }
+.gmw-settings-root .gmw-table { width: 100%; border-collapse: collapse; margin: 4px 0 6px; table-layout: fixed; }
+.gmw-settings-root .gmw-table th { text-align: left; font-size: 0.86em; color: var(--gmw-muted); font-weight: 600; padding: 2px 0; }
+.gmw-settings-root .gmw-table th:first-child, .gmw-settings-root .gmw-table td:first-child { padding-right: var(--gmw-gap); }
+.gmw-settings-root .gmw-table td { padding: 2px 0; }
+.gmw-settings-root .gmw-table th:last-child, .gmw-settings-root .gmw-table td:last-child { width: 28px; text-align: center; padding-left: 4px; }
+.gmw-settings-root .gmw-table a { cursor: pointer; color: var(--gmw-muted); }
+.gmw-settings-root .gmw-table a:hover { color: var(--gmw-bad); }
+.gmw-settings-root input.gmw-unmapped { border-color: var(--gmw-accent); }
+.gmw-settings-root .gmw-check { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 4px; line-height: 1.35; }
+.gmw-settings-root .gmw-check input { margin-top: 2px; flex: 0 0 auto; }
+.gmw-settings-root footer.gmw-row { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 4px; }
+.gmw-settings-root footer.gmw-row .hint { margin: 0 auto 0 0; }
+.gmw-settings-root footer button { width: auto; }
+.gmw-settings-root .gmw-error { color: var(--gmw-bad); }
+.gmw-settings-root .gmw-error a { text-decoration: underline; cursor: pointer; }
+@media (max-width: 560px) { .gmw-settings-root .gmw-two, .gmw-settings-root .gmw-three { grid-template-columns: 1fr; } }
+
+/* Примеры в пустой ленте */
+.gm-whispers .gmw-link { color: var(--gmw-accent); cursor: pointer; font-size: 0.9em; margin-left: 6px; }
+.gm-whispers .gmw-more { align-self: flex-start; margin: 2px 0 0; }
+
+/* Мастер первого запуска и «Что нового» */
+.gm-whispers .gmw-setup { padding: 6px 4px; line-height: 1.4; }
+.gm-whispers .gmw-setup ol { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.gm-whispers .gmw-setup li { display: flex; gap: 10px; align-items: flex-start; color: var(--gmw-muted); }
+.gm-whispers .gmw-setup li i { margin-top: 3px; }
+.gm-whispers .gmw-setup li.active { color: inherit; }
+.gm-whispers .gmw-setup li.active i { color: var(--gmw-accent); }
+.gm-whispers .gmw-setup li.done i { color: #6fae5a; }
+.gm-whispers .gmw-setup li.done b { text-decoration: line-through; opacity: 0.7; }
+.gm-whispers .gmw-setup a { color: var(--gmw-accent); cursor: pointer; text-decoration: underline; }
+.gm-whispers .gmw-setup code { font-size: 0.92em; }
+.gmw-whatsnew h4 { margin: 0.4em 0 0.2em; }
+.gmw-whatsnew ul { margin: 0 0 0.6em; padding-left: 1.2em; line-height: 1.4; }
+.gmw-warn { color: var(--gmw-accent); }
+.gmw-settings-root textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px; }
+.gmw-settings-root .gmw-sources td:nth-child(2) { width: 190px; }
+.gmw-settings-root .gmw-sources td:last-child { width: auto; text-align: left; font-size: 0.86em; padding-left: 8px; }
+.gmw-settings-root .gmw-sources th:last-child { width: auto; }
+.gmw-settings-root .gmw-packs { display: flex; flex-direction: column; gap: 2px; }
+.gmw-settings-root .gmw-pack { margin: 0; }
+.gm-whispers .gmw-partial { padding: 6px 0 0; opacity: 0.92; }
+.gm-whispers .gmw-partial::after { content: "▍"; color: var(--gmw-accent); animation: gmw-caret 1s steps(2) infinite; }
+@keyframes gmw-caret { 50% { opacity: 0; } }
+.gm-whispers .gmw-inline-btn { display: inline-flex; width: auto; height: 24px; padding: 0 8px; margin: 0 2px; vertical-align: middle; }
+
+/* Вкладки окна настроек */
+.gmw-settings-root .gmw-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 0 8px; border-bottom: 1px solid rgba(127, 127, 127, 0.35); }
+.gmw-settings-root .gmw-tabs a { padding: 6px 12px; border-radius: 6px 6px 0 0; color: var(--gmw-muted); cursor: pointer; border: 1px solid transparent; border-bottom: none; white-space: nowrap; }
+.gmw-settings-root .gmw-tabs a:hover { color: inherit; }
+.gmw-settings-root .gmw-tabs a.active { color: var(--gmw-accent); border-color: rgba(127, 127, 127, 0.35); background: rgba(127, 127, 127, 0.08); margin-bottom: -1px; }
+.gmw-settings-root .gmw-tabs .gmw-badge { display: inline-block; min-width: 1.2em; margin-left: 5px; padding: 0 4px; border-radius: 8px; background: var(--gmw-bad); color: #fff; font-size: 0.75em; text-align: center; line-height: 1.4; }
+.gmw-settings-root .gmw-tab { display: none; }
+.gmw-settings-root .gmw-tab.active { display: block; }

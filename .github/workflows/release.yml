@@ -1,0 +1,29 @@
+# Релиз по тегу: git tag v0.3.0 && git push --tags → собирается прод-билд и выкладывается в GitHub Releases.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build release
+        run: python tools/build_release.py --out release
+      - name: Check tag matches version
+        run: |
+          VER=$(python -c "import json;print(json.load(open('foundry-module/gm-whispers/module.json'))['version'])")
+          [ "v$VER" = "${GITHUB_REF_NAME}" ] || { echo "Тег ${GITHUB_REF_NAME} не совпадает с версией v$VER"; exit 1; }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/module.json
+            release/gm-whispers-v*.zip
+            release/GM_Whispers_Core-v*.zip
+            release/CHECKSUMS.txt
+          generate_release_notes: true
