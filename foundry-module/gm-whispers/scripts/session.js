@@ -8,14 +8,16 @@ import { markSynced } from "./kbsync.js";
 import { getBible, updateBibleAfterSummary } from "./bible.js";
 import { gatherContext } from "./context.js";
 import { esc, renderMarkdown, sourcesHtml } from "./md.js";
+import { T } from "./i18n.js";
 
-export const DIARY_FOLDER = "GM Whispers · Дневник кампании";
+/** Папка дневника кампании (имя — по языку интерфейса, lang/*.json). */
+export function diaryFolderName() { return T("GMW.Summary.DiaryFolder"); }
 const HOUR = 3600 * 1000;
 
 const strip = (html, max = 400) => stripHtml(html, max);
 
 function hhmm(ts) {
-  return new Date(ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return new Date(ts).toLocaleTimeString(game.i18n.lang, { hour: "2-digit", minute: "2-digit" });
 }
 
 /** Сообщения чата за период в компактном виде. */
@@ -33,7 +35,7 @@ export function collectMessages(fromTs, toTs = Date.now()) {
       return `${r.formula} = ${total}`;
     });
     if (rolls.length && /^[\d.,\s]+$/.test(content)) content = ""; // карточка броска с одним числом
-    const text = [flavor, content, rolls.length ? `бросок ${rolls.join("; ")}` : ""].filter(Boolean).join(" — ");
+    const text = [flavor, content, rolls.length ? T("GMW.Log.Roll", { rolls: rolls.join("; ") }) : ""].filter(Boolean).join(" — ");
     if (!text) continue;
     const whisper = (m.whisper ?? []).map(id => game.users.get(id)?.name).filter(Boolean).join(", ");
     out.push({ t: hhmm(ts), who, kind: m.type ?? "", text, whisper: whisper || undefined });
@@ -42,13 +44,15 @@ export function collectMessages(fromTs, toTs = Date.now()) {
 }
 
 async function diaryFolder() {
-  let folder = game.folders.find(f => f.type === "JournalEntry" && f.name === DIARY_FOLDER);
-  if (!folder) folder = await Folder.create({ name: DIARY_FOLDER, type: "JournalEntry", color: "#5b4a2a" });
+  const name = diaryFolderName();
+  let folder = game.folders.find(f => f.type === "JournalEntry" && f.name === name);
+  if (!folder) folder = await Folder.create({ name, type: "JournalEntry", color: "#5b4a2a" });
   return folder;
 }
 
 function diaryEntries() {
-  const folder = game.folders.find(f => f.type === "JournalEntry" && f.name === DIARY_FOLDER);
+  const name = diaryFolderName();
+  const folder = game.folders.find(f => f.type === "JournalEntry" && f.name === name);
   if (!folder) return [];
   return game.journal.filter(j => j.folder?.id === folder.id)
     .sort((a, b) => (a.getFlag(MODULE_ID, "session")?.to ?? 0) - (b.getFlag(MODULE_ID, "session")?.to ?? 0));
@@ -66,18 +70,18 @@ async function createDiaryEntry(res, { from, to, notes, period }) {
   const md = res.markdown ?? "";
   const title = md.match(/^#\s+(.+)$/m)?.[1]?.trim();
   const body = md.replace(/^#\s+.+$/m, "").trim(); // заголовок уходит в название журнала
-  const date = new Date(to).toLocaleDateString("ru-RU");
-  const name = `Сессия ${n} — ${date}${title ? ": " + title : ""}`;
+  const date = new Date(to).toLocaleDateString(game.i18n.lang);
+  const name = T("GMW.Summary.EntryName", { n, date }) + (title ? ": " + title : "");
   let html = renderMarkdown(body, { citations: res.citations ?? [], journal: true });
   html += sourcesHtml(res.citations ?? []);
-  if (notes?.trim()) html += `<h3>Заметки мастера</h3><p>${esc(notes.trim()).replace(/\n/g, "<br>")}</p>`;
-  html += `<p><em>Черновик GM Whispers · ${esc(period)} · проверь и поправь при необходимости.</em></p>`;
+  if (notes?.trim()) html += `<h3>${esc(T("GMW.Summary.GmNotes"))}</h3><p>${esc(notes.trim()).replace(/\n/g, "<br>")}</p>`;
+  html += `<p><em>${esc(T("GMW.Summary.Draft", { period }))}</em></p>`;
   return JournalEntry.create({
     name,
     folder: folder.id,
     ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE },
     flags: { [MODULE_ID]: { session: { n, from, to } } },
-    pages: [{ name: "Итоги", type: "text", text: { content: html, format: CONST.JOURNAL_ENTRY_PAGE_FORMATS.HTML } }],
+    pages: [{ name: T("GMW.Summary.PageName"), type: "text", text: { content: html, format: CONST.JOURNAL_ENTRY_PAGE_FORMATS.HTML } }],
   });
 }
 
@@ -87,7 +91,7 @@ async function indexEntry(entry) {
   markSynced([page.uuid]); // автообновление уже поставило страницу в очередь — не слать дважды
   await request("/kb/upsert", {
     method: "POST",
-    body: { pages: [{ uuid: page.uuid, entry: entry.name, page: page.name, folder: DIARY_FOLDER, html: page.text?.content ?? "" }] },
+    body: { pages: [{ uuid: page.uuid, entry: entry.name, page: page.name, folder: diaryFolderName(), html: page.text?.content ?? "" }] },
     timeout: 60000,
   });
 }
@@ -100,7 +104,7 @@ async function syncCraig(item, panel) {
     return null;
   }
   const files = new Set(res.files ?? []);
-  item.phase = "Забираю запись Craig";
+  item.phase = T("GMW.Summary.CraigFetch");
   item.progress = { phase: "start", pct: 0, at: Date.now() };
   panel.updateItem(item);
   const deadline = Date.now() + 60 * 60 * 1000;
@@ -111,12 +115,12 @@ async function syncCraig(item, panel) {
     try { jobs = (await request("/craig/jobs", { timeout: 8000 })).jobs ?? []; } catch (_) { continue; }
     const mine = jobs.filter(j => files.has(j.file) && j.started >= item.started - 60000);
     if (!mine.length && Date.now() - item.started > 5 * 60 * 1000) {
-      throw new Error("Сервер не начал обработку записи за 5 минут — проверь окно сервера и лог data/logs/craig-*.log.");
+      throw new Error(T("GMW.Summary.CraigNotStarted"));
     }
     const running = mine.find(j => j.state === "running");
     if (running) {
       if (running.progress) {
-        item.phase = files.size > 1 ? `Расшифровываю ${running.file}` : "Расшифровываю запись Craig";
+        item.phase = files.size > 1 ? T("GMW.Summary.CraigTranscribingFile", { file: running.file }) : T("GMW.Summary.CraigTranscribing");
         item.progress = running.progress;
         panel.updateItem(item);
       }
@@ -124,16 +128,16 @@ async function syncCraig(item, panel) {
     }
     if (mine.length < files.size) continue; // ещё не начали
     for (const j of mine) {
-      if (j.state === "error") throw new Error(`Craig «${j.file}»: ${j.message}`);
+      if (j.state === "error") throw new Error(T("GMW.Summary.CraigFileError", { file: j.file, message: j.message }));
       if (j.session) sid = j.session;
     }
     return sid;
   }
-  throw new Error("Обработка записи Craig не закончилась за час — проверь окно сервера.");
+  throw new Error(T("GMW.Summary.CraigTimeout"));
 }
 
 function fmtTime(ts) {
-  return ts ? new Date(ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+  return ts ? new Date(ts).toLocaleString(game.i18n.lang, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
 }
 
 /** Диалог «Итоги сессии» и весь процесс. panel — открытая панель советника (для ленты и статуса). */
@@ -147,7 +151,7 @@ export async function openSummaryDialog(panel) {
   try {
     sessions = (await request("/session/list", { timeout: 8000 })).sessions ?? [];
   } catch (err) {
-    ui.notifications.warn(`GM Whispers: не удалось получить список сессий (${err.message}). Доступен только текущий чат.`);
+    ui.notifications.warn(T("GMW.Summary.SessionsFailed", { reason: err.message }));
   }
   // Новые записи Craig в облачной папке (один просмотр списка файлов на сервере).
   let craig = { enabled: false, pending: [] };
@@ -157,37 +161,37 @@ export async function openSummaryDialog(panel) {
   const pendingCraig = craig.pending ?? [];
   const count = from => game.messages.contents.filter(m => (m.timestamp ?? 0) >= from && (m.timestamp ?? 0) <= now).length;
   const chatOpts = [
-    { v: "chat:last", from: last, label: last ? `Чат с прошлых итогов (${fmtTime(last)})` : "Весь текущий чат" },
-    { v: "chat:h8", from: now - 8 * HOUR, label: "Чат за последние 8 часов" },
-    { v: "chat:all", from: 0, label: "Весь текущий чат" },
+    { v: "chat:last", from: last, label: last ? T("GMW.Summary.ChatSinceLast", { time: fmtTime(last) }) : T("GMW.Summary.ChatAll") },
+    { v: "chat:h8", from: now - 8 * HOUR, label: T("GMW.Summary.Chat8h") },
+    { v: "chat:all", from: 0, label: T("GMW.Summary.ChatAll") },
   ];
   const sessOpts = sessions.map(x => ({
     v: `s:${x.id}`,
     id: x.id,
     first: x.first,
     last: x.last,
-    label: `${x.label} — событий ${x.events}${x.transcript ? `, голос: ${x.transcript} реплик` : ", голоса нет"}`,
+    label: `${T("GMW.Summary.SessionEvents", { label: x.label, n: x.events })}, ${x.transcript ? T("GMW.Summary.SessionVoice", { n: x.transcript }) : T("GMW.Summary.SessionNoVoice")}`,
   }));
   const content = `
     <div class="gmw-dialog">
-      <label>Что подводим
+      <label>${esc(T("GMW.Summary.Source"))}
         <select name="source">
-          ${sessOpts.length ? `<optgroup label="Журнал сессий GM Whispers">${sessOpts.map(o => `<option value="${o.v}">${esc(o.label)}</option>`).join("")}</optgroup>` : ""}
-          <optgroup label="Только текущий чат Foundry">
-            ${chatOpts.map(o => `<option value="${o.v}">${esc(o.label)} — ${count(o.from)} сообщ.</option>`).join("")}
+          ${sessOpts.length ? `<optgroup label="${esc(T("GMW.Summary.GroupSessions"))}">${sessOpts.map(o => `<option value="${o.v}">${esc(o.label)}</option>`).join("")}</optgroup>` : ""}
+          <optgroup label="${esc(T("GMW.Summary.GroupChat"))}">
+            ${chatOpts.map(o => `<option value="${o.v}">${esc(o.label)} — ${esc(T("GMW.Summary.Messages", { n: count(o.from) }))}</option>`).join("")}
           </optgroup>
         </select>
       </label>
       ${pendingCraig.length ? `
       <label class="gmw-check"><input type="checkbox" name="craigSync" checked>
-        Сначала забрать из Craig: ${pendingCraig.map(f => `${esc(f.file)} (${Math.round(f.size / 1048576)} МБ)`).join(", ")}
-      </label>` : (craig.enabled ? `<p class="hint">Новых записей Craig в папке нет.</p>` : "")}
-      <label>Расшифровка голоса (необязательно)
+        ${esc(T("GMW.Summary.CraigSyncFirst"))} ${pendingCraig.map(f => esc(T("GMW.Summary.FileSize", { file: f.file, mb: Math.round(f.size / 1048576) }))).join(", ")}
+      </label>` : (craig.enabled ? `<p class="hint">${esc(T("GMW.Summary.NoNewCraig"))}</p>` : "")}
+      <label>${esc(T("GMW.Summary.TranscriptFile"))}
         <input type="file" name="transcriptFile" accept=".txt,.srt,.vtt,text/plain">
       </label>
-      <p class="hint">Запись Craig проще расшифровать здесь, на видеокарте: перетащи zip на <code>server\\transcribe.bat</code> — расшифровка сама привяжется к сессии. Сюда — только если текст уже есть (txt / srt / vtt).</p>
-      <label>Заметки мастера
-        <textarea name="notes" rows="6" placeholder="Что важно и могло не попасть в запись: решения, договорённости, кто что получил, твои планы на последствия…"></textarea>
+      <p class="hint">${esc(T("GMW.Summary.TranscriptHint"))}</p>
+      <label>${esc(T("GMW.Summary.GmNotes"))}
+        <textarea name="notes" rows="6" placeholder="${esc(T("GMW.Summary.NotesPlaceholder"))}"></textarea>
       </label>
     </div>`;
 
@@ -196,10 +200,10 @@ export async function openSummaryDialog(panel) {
   let data;
   try {
     data = await foundry.applications.api.DialogV2.input({
-      window: { title: "GM Whispers — итоги сессии", icon: "fas fa-scroll" },
+      window: { title: T("GMW.Summary.Title"), icon: "fas fa-scroll" },
       position: { width: 600 },
       content,
-      ok: { label: "Составить итоги", icon: "fas fa-feather" },
+      ok: { label: T("GMW.Summary.Go"), icon: "fas fa-feather" },
       render: (_event, dialog) => {
         const input = (dialog.element ?? dialog).querySelector?.("input[name=transcriptFile]");
         input?.addEventListener("change", async () => {
@@ -222,15 +226,15 @@ export async function openSummaryDialog(panel) {
   let sessionId = sess?.id ?? null;
   const from = sess?.first ?? chat?.from ?? 0;
   const to = sess?.last ?? now;
-  const period = sess ? `сессия ${sess.label.split(" — ")[0]}` : (chat?.label ?? "");
+  const period = sess ? T("GMW.Summary.PeriodSession", { label: sess.label.split(" — ")[0] }) : (chat?.label ?? "");
   // Чат прикладываем всегда для выбранного периода: сервер использует его, только если журнал событий пуст.
   const messages = collectMessages(from, sess ? to + HOUR : now);
 
   if (!sessionId && !messages.length && !notes.trim() && !fileText) {
-    return ui.notifications.warn("GM Whispers: нет ни событий, ни расшифровки, ни заметок.");
+    return ui.notifications.warn(T("GMW.Summary.NothingToSummarize"));
   }
 
-  const item = { question: `📜 Итоги: ${period}`, pending: true, started: Date.now() };
+  const item = { question: T("GMW.Summary.FeedTitle", { period }), pending: true, started: Date.now() };
   panel.pushItem(item);
   panel.busy = true;
   panel.render();
@@ -245,7 +249,7 @@ export async function openSummaryDialog(panel) {
       });
       sessionId = up.session ?? sessionId;
     }
-    item.phase = "Пишу итоги (обычно 1–3 мин)";
+    item.phase = T("GMW.Summary.Writing");
     item.progress = null;
     item.indeterminate = true;
     panel.updateItem(item);
@@ -260,19 +264,19 @@ export async function openSummaryDialog(panel) {
     try {
       await indexEntry(entry);
     } catch (err) {
-      ui.notifications.warn(`GM Whispers: итоги сохранены, но не добавлены в базу (${err.message}). Нажми «База».`);
+      ui.notifications.warn(T("GMW.Summary.NotIndexed", { reason: err.message }));
     }
     try {
-      item.phase = "Обновляю библию кампании";
+      item.phase = T("GMW.Summary.UpdatingBible");
       panel.updateItem(item);
       await updateBibleAfterSummary(res.markdown);
     } catch (err) {
-      ui.notifications.warn(`GM Whispers: итоги сохранены, но библия не обновлена (${err.message}).`);
+      ui.notifications.warn(T("GMW.Summary.BibleNotUpdated", { reason: err.message }));
     }
     const st = res.stats ?? {};
     Object.assign(item, {
       pending: false,
-      question: `📜 Итоги: ${period} · событий ${st.events ?? 0}, голос ${st.voice ?? 0}${notes.trim() ? ", заметки" : ""}`,
+      question: `${T("GMW.Summary.FeedTitle", { period })} · ${T("GMW.Summary.FeedStats", { events: st.events ?? 0, voice: st.voice ?? 0 })}${notes.trim() ? `, ${T("GMW.Summary.FeedNotes")}` : ""}`,
       answer: res.markdown,
       citations: res.citations,
       usage: res.usage,

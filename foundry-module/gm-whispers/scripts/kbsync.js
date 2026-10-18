@@ -142,7 +142,8 @@ function markEntry(entry, removed = false) {
 }
 
 export function registerKbSync() {
-  const on = () => game.user.isGM && game.users.activeGM?.id === game.user.id && game.settings.get(MODULE_ID, "kbAutoSync");
+  // Только у активного мастера, чтобы правки не уходили дважды. Автообновление включено всегда.
+  const on = () => game.user.isGM && game.users.activeGM?.id === game.user.id;
   const safe = (fn) => (...a) => { try { fn(...a); } catch (e) { console.warn(`${MODULE_ID} | автообновление базы`, e); } };
   Hooks.on("createJournalEntryPage", safe((page) => { if (on()) markPage(page); }));
   Hooks.on("updateJournalEntryPage", safe((page) => { if (on()) markPage(page); }));

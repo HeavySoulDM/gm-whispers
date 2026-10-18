@@ -5,8 +5,9 @@
  */
 
 import { isDnd5e, stripHtml as stripHtmlSafe } from "./api.js";
+import { T } from "./i18n.js";
 
-const DOOR_STATE = { 0: "закрыта", 1: "открыта", 2: "заперта" };
+const DOOR_STATE = { 0: "GMW.Tactics.DoorClosed", 1: "GMW.Tactics.DoorOpen", 2: "GMW.Tactics.DoorLocked" };
 const NEAR_FT = 60;      // радиус, в котором ищем двери
 const SCENE_FT = 120;    // вне боя: кого считать участниками вокруг фокуса
 
@@ -101,7 +102,7 @@ function wallCover(attacker, target) {
   return best === 5 ? null : best;
 }
 
-const COVER = { 0: null, 1: "половинное", 2: "половинное", 3: "три четверти", 4: "полное (не прицелиться)" };
+const COVER = { 0: null, 1: "GMW.Tactics.CoverHalf", 2: "GMW.Tactics.CoverHalf", 3: "GMW.Tactics.CoverThreeQuarters", 4: "GMW.Tactics.CoverFull" };
 
 /** Существа на линии между двумя токенами дают половинное укрытие. */
 function creaturesBetween(a, b, all) {
@@ -143,16 +144,16 @@ function isConcentrating(actor) {
 
 function movementText(actor) {
   const m = actor?.system?.attributes?.movement ?? {};
-  const units = m.units ?? "фт";
-  const names = { walk: "пешком", fly: "полёт", swim: "плавание", climb: "лазание", burrow: "копание" };
-  const parts = Object.entries(names).filter(([k]) => Number(m[k]) > 0).map(([k, n]) => `${n} ${m[k]}`);
-  if (m.hover) parts.push("парит");
+  const units = m.units ?? T("GMW.Tactics.Ft");
+  const names = { walk: "GMW.Tactics.MoveWalk", fly: "GMW.Tactics.MoveFly", swim: "GMW.Tactics.MoveSwim", climb: "GMW.Tactics.MoveClimb", burrow: "GMW.Tactics.MoveBurrow" };
+  const parts = Object.entries(names).filter(([k]) => Number(m[k]) > 0).map(([k, n]) => `${T(n)} ${m[k]}`);
+  if (m.hover) parts.push(T("GMW.Tactics.MoveHover"));
   return parts.length ? `${parts.join(", ")} ${units}` : "";
 }
 
 const stripHtml = (html, max = 180) => stripHtmlSafe(html, max);
 
-const ACTIVATION = { bonus: "бонусное", reaction: "реакция", legendary: "легендарное", lair: "логово", minute: "1 мин", hour: "1 ч" };
+const ACTIVATION = { bonus: "GMW.Tactics.ActBonus", reaction: "GMW.Tactics.ActReaction", legendary: "GMW.Tactics.ActLegendary", lair: "GMW.Tactics.ActLair", minute: "GMW.Tactics.ActMinute", hour: "GMW.Tactics.ActHour" };
 
 function activitiesOf(item) {
   const a = item.system?.activities;
@@ -166,21 +167,21 @@ function itemLine(item, { detail = false } = {}) {
   const acts = activitiesOf(item);
   const act = acts.find(x => x.labels?.toHit) ?? acts.find(x => x.labels?.save) ?? acts[0];
   const at = act?.activation?.type;
-  if (ACTIVATION[at]) bits.push(ACTIVATION[at]);
+  if (ACTIVATION[at]) bits.push(T(ACTIVATION[at]));
   for (const x of acts) {
     const l = x.labels ?? {};
     const dmg = (l.damage ?? l.damages ?? []).map(d => d.label ?? d.formula).filter(Boolean).join(" + ");
-    const part = [l.toHit ? `атака ${l.toHit}` : "", l.save ?? "", dmg].filter(Boolean).join(", ");
+    const part = [l.toHit ? T("GMW.Tactics.Attack", { bonus: l.toHit }) : "", l.save ?? "", dmg].filter(Boolean).join(", ");
     if (part && !bits.includes(part)) bits.push(part);
     if (bits.length > 4) break;
   }
   const r = sys.range ?? {};
-  if (r.reach) bits.push(`досягаемость ${r.reach} фт`);
-  if (r.value) bits.push(r.long ? `дальность ${r.value}/${r.long} фт` : `дальность ${r.value} фт`);
+  if (r.reach) bits.push(T("GMW.Tactics.Reach", { n: r.reach }));
+  if (r.value) bits.push(r.long ? T("GMW.Tactics.RangeLong", { n: r.value, long: r.long }) : T("GMW.Tactics.Range", { n: r.value }));
   const u = sys.uses ?? {};
   const rec = (u.recovery ?? []).find?.(x => x.period === "recharge");
-  if (rec?.formula) bits.push(`перезарядка ${rec.formula}–6${u.value === 0 ? " (разряжено)" : ""}`);
-  else if (u.max) bits.push(`исп. ${u.value ?? "?"}/${u.max}`);
+  if (rec?.formula) bits.push(`${T("GMW.Tactics.Recharge", { formula: rec.formula })}${u.value === 0 ? ` (${T("GMW.Tactics.Discharged")})` : ""}`);
+  else if (u.max) bits.push(T("GMW.Tactics.Uses", { value: u.value ?? "?", max: u.max }));
   let line = bits.length ? `${item.name} (${bits.join("; ")})` : item.name;
   if (detail) {
     const d = stripHtml(sys.description?.value);
@@ -207,11 +208,11 @@ function spellsSummary(actor, { maxPerLevel = 12 } = {}) {
   const out = [];
   for (const [lvl, names] of [...byLevel.entries()].sort((x, y) => x[0] - y[0])) {
     const slot = lvl ? sys.spells?.[`spell${lvl}`] : null;
-    const slotText = slot?.max ? ` [ячейки ${slot.value}/${slot.max}]` : "";
-    out.push(`${lvl ? lvl + " круг" : "заговоры"}${slotText}: ${names.slice(0, maxPerLevel).join(", ")}`);
+    const slotText = slot?.max ? ` [${T("GMW.Tactics.Slots", { value: slot.value, max: slot.max })}]` : "";
+    out.push(`${lvl ? T("GMW.Tactics.SpellLevel", { n: lvl }) : T("GMW.Tactics.Cantrips")}${slotText}: ${names.slice(0, maxPerLevel).join(", ")}`);
   }
   const dc = sys.attributes?.spell?.dc;
-  if (out.length && dc) out.unshift(`СЛ заклинаний ${dc}`);
+  if (out.length && dc) out.unshift(T("GMW.Tactics.SpellDc", { dc }));
   return out;
 }
 
@@ -236,7 +237,7 @@ export function statblock(actor, { detail = false } = {}) {
       hp: hp?.max ? { value: hp.value, max: hp.max } : undefined,
       speed: movementText(actor),
       abilities: [], spells: null, traits: [],
-      note: `система ${game.system?.title ?? game.system?.id}: подробный статблок недоступен, см. описание существа`,
+      note: T("GMW.Tactics.OtherSystem", { system: game.system?.title ?? game.system?.id }),
     };
   }
   const D5 = CONFIG.DND5E ?? {};
@@ -258,16 +259,16 @@ export function statblock(actor, { detail = false } = {}) {
   const di = traitList(sys.traits?.di, D5.damageTypes);
   const dv = traitList(sys.traits?.dv, D5.damageTypes);
   const ci = traitList(sys.traits?.ci, D5.conditionTypes);
-  if (dr.length) out.traits.push(`сопротивление: ${dr.join(", ")}`);
-  if (di.length) out.traits.push(`иммунитет: ${di.join(", ")}`);
-  if (dv.length) out.traits.push(`уязвимость: ${dv.join(", ")}`);
-  if (ci.length) out.traits.push(`иммунитет к состояниям: ${ci.join(", ")}`);
+  if (dr.length) out.traits.push(T("GMW.Tactics.Resistance", { list: dr.join(", ") }));
+  if (di.length) out.traits.push(T("GMW.Tactics.Immunity", { list: di.join(", ") }));
+  if (dv.length) out.traits.push(T("GMW.Tactics.Vulnerability", { list: dv.join(", ") }));
+  if (ci.length) out.traits.push(T("GMW.Tactics.ConditionImmunity", { list: ci.join(", ") }));
   const la = sys.resources?.legact;
   const lr = sys.resources?.legres;
-  if (la?.max) out.traits.push(`легендарные действия ${la.value ?? la.max}/${la.max}`);
-  if (lr?.max) out.traits.push(`легендарное сопротивление ${lr.value ?? lr.max}/${lr.max}`);
+  if (la?.max) out.traits.push(T("GMW.Tactics.LegendaryActions", { value: la.value ?? la.max, max: la.max }));
+  if (lr?.max) out.traits.push(T("GMW.Tactics.LegendaryResistance", { value: lr.value ?? lr.max, max: lr.max }));
   const conc = concentrationOn(actor);
-  if (conc) out.traits.push(`концентрируется: ${conc}`);
+  if (conc) out.traits.push(T("GMW.Tactics.Concentrating", { name: conc }));
 
   const limit = detail ? 20 : 8;
   for (const item of actor.items) {
@@ -295,7 +296,7 @@ function tokenBasics(token) {
     name: token.name,
     side: sideOf(doc),
     cell: cellOf(token),
-    size: doc.width > 1 || doc.height > 1 ? `${doc.width}×${doc.height} кл.` : undefined,
+    size: doc.width > 1 || doc.height > 1 ? T("GMW.Tactics.SizeCells", { w: doc.width, h: doc.height }) : undefined,
     elevation: doc.elevation || undefined,
     hp: hp?.max ? { value: hp.value, max: hp.max } : undefined,
     ac: actor?.system?.attributes?.ac?.value,
@@ -307,9 +308,9 @@ function tokenBasics(token) {
 
 function darknessText(scene) {
   const d = scene.environment?.darknessLevel ?? scene.darkness ?? 0;
-  if (d >= 0.75) return "темно";
-  if (d >= 0.35) return "сумерки";
-  return "светло";
+  if (d >= 0.75) return T("GMW.Tactics.LightDark");
+  if (d >= 0.35) return T("GMW.Tactics.LightDusk");
+  return T("GMW.Tactics.LightBright");
 }
 
 function nearbyDoors(focus) {
@@ -322,31 +323,31 @@ function nearbyDoors(focus) {
     let d;
     try { d = canvas.grid.measurePath([focus.center, mid]).distance; } catch (_) { continue; }
     if (d > NEAR_FT) continue;
-    out.push({ d: round5(d), text: `${doc.door === 2 ? "потайная дверь" : "дверь"}, ${DOOR_STATE[doc.ds] ?? "?"}, ${round5(d)} фт` });
+    out.push({ d: round5(d), text: `${doc.door === 2 ? T("GMW.Tactics.SecretDoor") : T("GMW.Tactics.Door")}, ${DOOR_STATE[doc.ds] ? T(DOOR_STATE[doc.ds]) : "?"}, ${round5(d)} ${T("GMW.Tactics.Ft")}` });
   }
   return out.sort((a, b) => a.d - b.d).slice(0, 8).map(x => x.text);
 }
 
 const BEHAVIOR = {
-  modifyMovementCost: "трудная местность",
-  applyActiveEffect: "накладывает эффект",
-  adjustDarknessLevel: "меняет освещённость",
-  teleportToken: "телепорт",
-  changeLevel: "переход между уровнями",
-  defineSurface: "поверхность",
-  executeMacro: "срабатывает макрос",
-  executeScript: "срабатывает скрипт",
+  modifyMovementCost: "GMW.Tactics.RegionDifficult",
+  applyActiveEffect: "GMW.Tactics.RegionEffect",
+  adjustDarknessLevel: "GMW.Tactics.RegionDarkness",
+  teleportToken: "GMW.Tactics.RegionTeleport",
+  changeLevel: "GMW.Tactics.RegionLevel",
+  defineSurface: "GMW.Tactics.RegionSurface",
+  executeMacro: "GMW.Tactics.RegionMacro",
+  executeScript: "GMW.Tactics.RegionScript",
 };
 
 function regionsInfo(participants) {
   const out = [];
   for (const region of canvas.scene?.regions ?? []) {
-    const kinds = [...new Set((region.behaviors?.contents ?? []).filter(b => !b.disabled).map(b => BEHAVIOR[b.type]).filter(Boolean))];
+    const kinds = [...new Set((region.behaviors?.contents ?? []).filter(b => !b.disabled).map(b => BEHAVIOR[b.type]).filter(Boolean))].map(k => T(k));
     const inside = participants.filter(t => {
       try { return region.testPoint({ x: t.center.x, y: t.center.y, elevation: t.document.elevation ?? 0 }); } catch (_) { return false; }
     }).map(t => t.name);
     if (!kinds.length && !inside.length) continue;
-    out.push(`«${region.name}»${kinds.length ? " — " + kinds.join(", ") : ""}${inside.length ? "; внутри: " + inside.join(", ") : ""}`);
+    out.push(`«${region.name}»${kinds.length ? " — " + kinds.join(", ") : ""}${inside.length ? `; ${T("GMW.Tactics.Inside")}: ` + inside.join(", ") : ""}`);
     if (out.length >= 12) break;
   }
   return out;
@@ -490,13 +491,13 @@ function buildPathfinder(focus, participants, maxFt) {
 
 /** Главная функция: сводка для токена, за которого думаем (по умолчанию — чей ход в бою). */
 export function tacticalSnapshot({ focusToken = null } = {}) {
-  if (!canvas?.ready || !canvas.scene) return { error: "Сцена не загружена." };
+  if (!canvas?.ready || !canvas.scene) return { error: T("GMW.Tactics.NoScene") };
   const combat = game.combat?.started && game.combat.scene?.id === canvas.scene.id ? game.combat : null;
 
   let focus = focusToken;
   if (!focus && combat?.combatant?.tokenId) focus = canvas.tokens.get(combat.combatant.tokenId);
   if (!focus) focus = canvas.tokens.controlled[0] ?? null;
-  if (!focus) return { error: "Нет активного боя на этой сцене. Выдели токен, за который нужно подумать." };
+  if (!focus) return { error: T("GMW.Tactics.NoFocus") };
 
   let participants;
   if (combat) {
@@ -524,7 +525,7 @@ export function tacticalSnapshot({ focusToken = null } = {}) {
     if (sb) info.statblock = sb;
     if (pathTo) {
       const p = pathTo(t);
-      info.walk = p == null ? { ft: null, reach: `дальше ${maxFt} фт пути` } : { ft: p, reach: p <= speed ? "за ход" : p <= speed * 2 ? "только Рывком" : "не дойти" };
+      info.walk = p == null ? { ft: null, reach: T("GMW.Tactics.PathFarther", { n: maxFt }) } : { ft: p, reach: p <= speed ? T("GMW.Tactics.ReachTurn") : p <= speed * 2 ? T("GMW.Tactics.ReachDash") : T("GMW.Tactics.ReachNo") };
     }
     const target = { x: t.center.x, y: t.center.y, elevation: t.document.elevation ?? 0 };
     const d = distanceBetween(focus, t);
@@ -545,13 +546,13 @@ export function tacticalSnapshot({ focusToken = null } = {}) {
   focusInfo.speedFt = speed;
   try {
     const sight = focus.document.sight;
-    if (sight?.enabled && sight.range) focusInfo.vision = `${sight.range} фт${sight.visionMode && sight.visionMode !== "basic" ? ` (${sight.visionMode})` : ""}`;
+    if (sight?.enabled && sight.range) focusInfo.vision = `${sight.range} ${T("GMW.Tactics.Ft")}${sight.visionMode && sight.visionMode !== "basic" ? ` (${sight.visionMode})` : ""}`;
   } catch (_) { /* нет зрения */ }
 
   return {
     scene: {
       name: canvas.scene.navName || canvas.scene.name,
-      grid: `${canvas.grid.distance} ${canvas.grid.units || "фт"} на клетку`,
+      grid: T("GMW.Tactics.GridCell", { d: canvas.grid.distance, units: canvas.grid.units || T("GMW.Tactics.Ft") }),
       light: darknessText(canvas.scene),
     },
     round: combat?.round ?? null,

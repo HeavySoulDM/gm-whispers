@@ -83,10 +83,17 @@ def lang_name(code: str) -> str:
     return LANG_NAMES.get(code, code)
 
 
+def is_english(request_lang: str | None = None) -> bool:
+    """Английские промпты — когда язык ответа английский. Для остальных языков — русские промпты + строка «Язык ответов: …»."""
+    return resolve_lang(request_lang) == "en"
+
+
 def block(request_lang: str | None = None, style: bool = True) -> str:
     """Текст о кампании для системного промпта. style=False — без правил длины/стиля (итоги, «К игре», библия: у них свой формат)."""
     p = load()
     lang = resolve_lang(request_lang)
+    if lang == "en":
+        return _block_en(p, style)
     lines = []
     title = f"«{p['name']}»" if p["name"] else "(название не задано)"
     lines.append(f"Кампания: {title}." + (f" Система: {p['system']}." if p["system"] else ""))
@@ -109,13 +116,41 @@ def block(request_lang: str | None = None, style: bool = True) -> str:
     return "\n".join(lines)
 
 
-def render(template: str, request_lang: str | None = None, bible: dict | None = None, style: bool = True) -> str:
-    """Подставить {campaign} и {lang} в шаблон промпта; с библией — добавить её в конец (одним блоком, он кэшируется)."""
+def _block_en(p: dict, style: bool) -> str:
+    from . import prompts_en as en
+
+    lines = []
+    title = f"\"{p['name']}\"" if p["name"] else "(no title set)"
+    lines.append(f"Campaign: {title}." + (f" System: {p['system']}." if p["system"] else ""))
+    if p["description"]:
+        lines.append(f"World and plot: {p['description']}")
+    if p["tone"]:
+        lines.append(f"Tone and style of answers: {p['tone']}")
+    if p["special_rules"]:
+        lines.append(f"Special and house rules (override the system's general rules): {p['special_rules']}")
+    lines.append("Answer in English. Names and titles as in the campaign materials.")
+    if not style:
+        return "\n".join(lines)
+    lines.append(en.LENGTH_RULES.get(p["answer_length"], en.LENGTH_RULES["normal"]))
+    if p["lines_only"] == "1":
+        lines.append(en.STYLE_LINES_ONLY)
+    if p["no_improv"] == "1":
+        lines.append(en.STYLE_NO_IMPROV)
+    if p["player_names"] == "1":
+        lines.append(en.STYLE_PLAYER_NAMES)
+    return "\n".join(lines)
+
+
+def render(template, request_lang: str | None = None, bible: dict | None = None, style: bool = True) -> str:
+    """Подставить {campaign} и {lang} в шаблон промпта; с библией — добавить её в конец (одним блоком, он кэшируется).
+    template — строка или {"ru": ..., "en": ...}: английский шаблон берётся, когда язык ответа английский."""
+    if isinstance(template, dict):
+        template = template.get("en" if is_english(request_lang) else "ru") or template["ru"]
     out = template.replace("{campaign}", block(request_lang, style)).replace("{lang}", lang_name(resolve_lang(request_lang)))
     if bible:
         from .bible import prompt_block
 
-        extra = prompt_block(bible)
+        extra = prompt_block(bible, english=is_english(request_lang))
         if extra:
             out = out + "\n\n" + extra
     return out

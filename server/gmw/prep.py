@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 
 from . import campaign
+from . import prompts_en as en
 from .advisor import TOOLS, collect_citations, make_tools
 from .kb import KnowledgeBase
 from .llm import model_for, run_tool_loop
@@ -57,7 +58,7 @@ async def prepare(kb: KnowledgeBase, summaries: list[str], notes: str = "", part
     model = model_for("lore")
     usage = Usage(model)
     boost = set((scene or {}).get("pageUuids", []))
-    run_tool, reg, tool_log = make_tools(kb, boost)
+    run_tool, reg, tool_log = make_tools(kb, boost, english=campaign.is_english(lang))
 
     header = []
     if party:
@@ -76,7 +77,7 @@ async def prepare(kb: KnowledgeBase, summaries: list[str], notes: str = "", part
         header.append("Итогов прошлых сессий нет — это начало кампании или дневник пуст: опирайся на заметки мастера и первую главу книги.")
     user_text = "\n\n".join(header) + "\n\nСоставь сводку «К игре»."
 
-    answer = await run_tool_loop(model, campaign.render(PREP_SYSTEM, lang, bible, style=False), [], user_text, TOOLS, run_tool, usage,
+    answer = await run_tool_loop(model, campaign.render({"ru": PREP_SYSTEM, "en": en.PREP_SYSTEM}, lang, bible, style=False), [], user_text, TOOLS, run_tool, usage,
                                  max_rounds=6, max_tokens=3500)
     cited = collect_citations(answer, reg)
     elapsed = round(time.time() - t0, 1)

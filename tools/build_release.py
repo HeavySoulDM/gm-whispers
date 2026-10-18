@@ -30,7 +30,7 @@ MODULE_ID = "gm-whispers"
 
 # Что НЕ попадает в релиз сервера.
 SERVER_EXCLUDE_DIRS = {".venv", "__pycache__", "data", "dist", "build"}
-SERVER_EXCLUDE_FILES = {".env", "gmw_core.spec"}  # spec — для сборки exe, пользователю не нужен
+SERVER_EXCLUDE_FILES = {".env", "gmw_core.spec", "start_tray.bat", "start_quiet.vbs"}  # spec — для exe; трей и тихий запуск в релиз не идут (решение 18.10: сервер запускают вручную)
 # Личные конфиги → пустые образцы.
 CONFIG_TEMPLATES = {
     "campaign.json": {"name": "", "system": "", "description": "", "tone": "", "special_rules": "", "lang": "auto",
@@ -38,7 +38,7 @@ CONFIG_TEMPLATES = {
     "speakers.json": {"_comment": "Кто есть кто в записи Craig: ник → подпись. Заполняется в Foundry: ⚙ Настройки сервера → Голос."},
     "ignore.json": {"_comment": "Что не учитывать в итогах. Заполняется в Foundry: ⚙ Настройки сервера → Голос.", "voice": ["kenku"], "chat": []},
 }
-TOOLS_INCLUDE = {"autostart.bat", "download_model.bat", "link_module.bat"}
+TOOLS_INCLUDE = {"download_model.bat", "link_module.bat"}  # autostart в релиз не идёт — запуск только вручную
 
 
 def read_version() -> str:
@@ -145,12 +145,16 @@ def main() -> int:
     for name in ("LICENSE",):
         if (ROOT / name).exists():
             shutil.copy2(ROOT / name, out / "GM_Whispers_Core" / name)
-    user_readme = ROOT / "docs" / "README_USER.md"
+    user_readme = ROOT / "README.md"
     if user_readme.exists():
         shutil.copy2(user_readme, out / "GM_Whispers_Core" / "README.md")
         shutil.copy2(user_readme, out / "README.md")
+        user_readme_en = ROOT / "README.en.md"
+        if user_readme_en.exists():
+            shutil.copy2(user_readme_en, out / "GM_Whispers_Core" / "README.en.md")
+            shutil.copy2(user_readme_en, out / "README.en.md")
     else:
-        warnings.append("Нет docs/README_USER.md — в релизе нет инструкции для пользователей.")
+        warnings.append("Нет README.md — в релизе нет инструкции для пользователей.")
     zip_dir(out / "GM_Whispers_Core", out / f"GM_Whispers_Core-v{version}.zip", "GM_Whispers_Core")
 
     # --- проверка на личные данные

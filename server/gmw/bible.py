@@ -15,6 +15,7 @@ import re
 import time
 
 from . import campaign
+from . import prompts_en as en
 from .advisor import TOOLS, make_tools
 from .kb import KnowledgeBase
 from .llm import model_for, run_tool_loop
@@ -24,6 +25,10 @@ MAX_BIBLE_CHARS = 18_000   # сколько библии уходит в про�
 PERMANENT_MARK = "=== ПОСТОЯННОЕ ==="
 CURRENT_MARK = "=== ТЕКУЩЕЕ ==="
 SUGGEST_HEAD = "## Предложения в постоянное"
+# Английские промпты (prompts_en.py) используют свои маркеры — разбор понимает оба варианта.
+PERMANENT_MARKS = (PERMANENT_MARK, "=== PERMANENT ===")
+CURRENT_MARKS = (CURRENT_MARK, "=== CURRENT ===")
+SUGGEST_HEADS = (SUGGEST_HEAD, "## Suggestions for Permanent")
 
 BUILD_SYSTEM = """Ты — помощник мастера настольной ролевой игры. Собери «Библию кампании»: краткую выжимку, которую модель будет получать с каждым вопросом мастера, чтобы не путать персонажей и держать тон. Читает только мастер, спойлеры допустимы.
 
@@ -75,21 +80,22 @@ UPDATE_SYSTEM = """Ты — помощник мастера настольной
 def split_sections(text: str) -> tuple[str, str]:
     """Ответ сборки → (постоянное, текущее)."""
     t = text or ""
-    if PERMANENT_MARK in t and CURRENT_MARK in t:
-        perm = t.split(PERMANENT_MARK, 1)[1].split(CURRENT_MARK, 1)[0]
-        cur = t.split(CURRENT_MARK, 1)[1]
-        return perm.strip(), cur.strip()
+    for pm, cm in zip(PERMANENT_MARKS, CURRENT_MARKS):
+        if pm in t and cm in t:
+            perm = t.split(pm, 1)[1].split(cm, 1)[0]
+            cur = t.split(cm, 1)[1]
+            return perm.strip(), cur.strip()
     # Модель не поставила маркеры: всё — в постоянное, текущее пустое.
     return t.strip(), ""
 
 
-def prompt_block(bible: dict | None) -> str:
+def prompt_block(bible: dict | None, english: bool = False) -> str:
     """Текст библии для системного промпта (или пусто). bible = {"permanent": str, "current": str}."""
     if not bible:
         return ""
     perm = (bible.get("permanent") or "").strip()
     cur = (bible.get("current") or "").strip()
-    cur = re.split(rf"^{re.escape(SUGGEST_HEAD)}", cur, maxsplit=1, flags=re.M)[0].strip()  # предложения модели — не факты
+    cur = re.split("^(?:" + "|".join(re.escape(h) for h in SUGGEST_HEADS) + ")", cur, maxsplit=1, flags=re.M)[0].strip()  # предложения модели — не факты
     if not perm and not cur:
         return ""
     if len(perm) > MAX_BIBLE_CHARS * 2 // 3:
@@ -97,11 +103,17 @@ def prompt_block(bible: dict | None) -> str:
     room = MAX_BIBLE_CHARS - len(perm)
     if len(cur) > room:
         cur = "…\n" + cur[-room:]
-    parts = ["=== БИБЛИЯ КАМПАНИИ (составлена мастером; при расхождении с базой знаний верь библии; уровни и хиты персонажей — в контексте запроса, не здесь) ==="]
+    if english:
+        from . import prompts_en as en
+        head, cur_head = en.BIBLE_HEADER, en.BIBLE_CURRENT_HEADER
+    else:
+        head = "=== БИБЛИЯ КАМПАНИИ (составлена мастером; при расхождении с базой знаний верь библии; уровни и хиты персонажей — в контексте запроса, не здесь) ==="
+        cur_head = "--- Текущее положение (после последней сессии) ---"
+    parts = [head]
     if perm:
         parts.append(perm)
     if cur:
-        parts.append("--- Текущее положение (после последней сессии) ---\n" + cur)
+        parts.append(cur_head + "\n" + cur)
     return "\n\n".join(parts)
 
 
@@ -117,7 +129,7 @@ async def build(kb: KnowledgeBase, quentas: list[dict], party: list | None, summ
     t0 = time.time()
     model = model_for("lore")
     usage = Usage(model)
-    run_tool, reg, tool_log = make_tools(kb)
+    run_tool, reg, tool_log = make_tools(kb, english=campaign.is_english(lang))
     parts = []
     if party:
         parts.append(f"Партия в Foundry: {_party_text(party)}")
@@ -130,7 +142,7 @@ async def build(kb: KnowledgeBase, quentas: list[dict], party: list | None, summ
     else:
         parts.append("Итогов сессий пока нет.")
     user_text = "\n\n".join(parts) + "\n\nСобери Библию кампании."
-    answer = await run_tool_loop(model, campaign.render(BUILD_SYSTEM, lang, style=False), [], user_text, TOOLS, run_tool, usage, max_rounds=6, max_tokens=5000)
+    answer = await run_tool_loop(model, campaign.render({"ru": BUILD_SYSTEM, "en": en.BUILD_SYSTEM}, lang, style=False), [], user_text, TOOLS, run_tool, usage, max_rounds=6, max_tokens=5000)
     perm, cur = split_sections(answer)
     elapsed = round(time.time() - t0, 1)
     usage.log("bible_build", {"quentas": len(quentas), "summaries": len(summaries), "seconds": elapsed, "tools": len(tool_log)})
@@ -147,7 +159,7 @@ async def update(permanent: str, current: str, summary: str, lang: str | None) -
         f"Прежнее «Текущее положение»:\n{_trim(current, 6000) or '(пусто — первая сессия)'}\n\n"
         f"Итоги новой сессии:\n{_trim(summary, 14000)}\n\nНапиши новое «Текущее положение»."
     )
-    answer = await run_tool_loop(model, campaign.render(UPDATE_SYSTEM, lang, style=False), [], user_text, [], lambda *_: "", usage, max_rounds=1, max_tokens=2500)
+    answer = await run_tool_loop(model, campaign.render({"ru": UPDATE_SYSTEM, "en": en.UPDATE_SYSTEM}, lang, style=False), [], user_text, [], lambda *_: "", usage, max_rounds=1, max_tokens=2500)
     elapsed = round(time.time() - t0, 1)
     usage.log("bible_update", {"seconds": elapsed})
     return {"current": answer.strip(), "usage": usage.as_dict(), "seconds": elapsed}

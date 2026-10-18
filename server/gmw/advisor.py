@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from .config import settings
 from . import campaign
+from . import prompts_en as en
 from .kb import KnowledgeBase
 from .llm import Tool, model_for, run_tool_loop
 from .usage import Usage
@@ -267,11 +268,17 @@ TACTICS_TASK = """Задача: предложи 2–3 варианта хода
 Формат: «Вариант 1 — название», затем 2–4 строки. В конце одна строка: какой вариант больше всего в характере существа."""
 
 
-def make_tools(kb: KnowledgeBase, boost: set | None = None):
-    """Исполнитель инструментов search_lore / read_page с реестром ссылок [S#]."""
+# Подписи источников для английских промптов (в базе они хранятся по-русски).
+LABEL_EN = {"Дневник кампании": "Campaign Diary", "Материалы ГМа": "GM notes", "Книга приключения": "Adventure book",
+            "Справочник мира": "Setting reference", "Правила": "Rules", "Прочие журналы": "Other journals"}
+
+
+def make_tools(kb: KnowledgeBase, boost: set | None = None, english: bool = False):
+    """Исполнитель инструментов search_lore / read_page с реестром ссылок [S#]. english — подписи источников и служебные ответы по-английски."""
     reg = Registry()
     tool_log: list = []
     boost = boost or set()
+    lbl = (lambda s: LABEL_EN.get(s, s)) if english else (lambda s: s)
 
     def run_tool(name: str, args: dict) -> str:
         if name == "search_lore":
@@ -283,11 +290,11 @@ def make_tools(kb: KnowledgeBase, boost: set | None = None):
             hits = kb.search(q, limit=limit, boost_pages=boost)
             tool_log.append({"tool": name, "query": q, "hits": len(hits)})
             if not hits:
-                return f"По запросу «{q}» ничего не найдено. Попробуй другие слова или формы."
+                return f"Nothing found for \"{q}\". Try other words or forms." if english else f"По запросу «{q}» ничего не найдено. Попробуй другие слова или формы."
             parts = []
             for c, _score in hits:
                 sid = reg.add(("chunk", c.id), c.page_uuid, c.title, c.label)
-                parts.append(f"[{sid}] {c.label} · {c.title}\n{c.text}")
+                parts.append(f"[{sid}] {lbl(c.label)} · {c.title}\n{c.text}")
             return "\n\n---\n\n".join(parts)
         if name == "read_page":
             ref = str(args.get("ref", "")).strip()
@@ -295,10 +302,10 @@ def make_tools(kb: KnowledgeBase, boost: set | None = None):
             page = kb.page_text(uuid or "")
             tool_log.append({"tool": name, "ref": ref, "found": bool(page)})
             if not page:
-                return f"Страница «{ref}» не найдена."
+                return f"Page \"{ref}\" not found." if english else f"Страница «{ref}» не найдена."
             sid = reg.add(("page", page.uuid), page.uuid, f"{page.entry} › {page.page}", page.label)
-            return f"[{sid}] {page.label} · {page.entry} › {page.page}\n{page.text}"
-        return f"Неизвестный инструмент {name}"
+            return f"[{sid}] {lbl(page.label)} · {page.entry} › {page.page}\n{page.text}"
+        return f"Unknown tool {name}" if english else f"Неизвестный инструмент {name}"
 
     return run_tool, reg, tool_log
 
@@ -328,7 +335,7 @@ async def ask(kb: KnowledgeBase, question: str, ctx: dict | None = None, history
     model = model_for(role)
     usage = Usage(model)
     boost = set(((ctx or {}).get("scene") or {}).get("pageUuids", []))
-    run_tool, reg, tool_log = make_tools(kb, boost)
+    run_tool, reg, tool_log = make_tools(kb, boost, english=campaign.is_english(lang))
 
     hist = [(h["q"], h["a"]) for h in (history or [])[-3:] if h.get("q") and h.get("a")]
     try:
@@ -366,15 +373,15 @@ async def ask(kb: KnowledgeBase, question: str, ctx: dict | None = None, history
     if tac_text:
         user_text = f"{tac_text}\n\n{user_text}"
         if role == "tactics":
-            user_text += "\n\n" + TACTICS_TASK.format(name=(focus or {}).get("name", "?"))
+            user_text += "\n\n" + (en.TACTICS_TASK if campaign.is_english(lang) else TACTICS_TASK).format(name=(focus or {}).get("name", "?"))
     if fast:
         user_text += "\n\n(Быстрый режим: ответь коротко, только по найденному выше, без новых поисков.)"
         answer = await run_tool_loop(
-            model, campaign.render(SYSTEM, lang, bible), hist, user_text, TOOLS, run_tool, usage,
+            model, campaign.render({"ru": SYSTEM, "en": en.ADVISOR_SYSTEM}, lang, bible), hist, user_text, TOOLS, run_tool, usage,
             max_rounds=1, max_tokens=800, reasoning=settings.openai_reasoning_fast, on_event=on_event,
         )
     else:
-        answer = await run_tool_loop(model, campaign.render(SYSTEM, lang, bible), hist, user_text, TOOLS, run_tool, usage, max_rounds=MAX_ROUNDS, on_event=on_event)
+        answer = await run_tool_loop(model, campaign.render({"ru": SYSTEM, "en": en.ADVISOR_SYSTEM}, lang, bible), hist, user_text, TOOLS, run_tool, usage, max_rounds=MAX_ROUNDS, on_event=on_event)
 
     answer = answer or "Не удалось сформулировать ответ."
     cited = collect_citations(answer, reg)

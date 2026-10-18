@@ -4,18 +4,19 @@
  */
 
 import { openPanel } from "./panel.js";
+import { T } from "./i18n.js";
 
 const ITEMS = [
-  { kind: "who", icon: "fa-circle-question", label: "Кто это и чего хочет" },
-  { kind: "line", icon: "fa-comment-dots", label: "Реплика сейчас" },
-  { kind: "tactics", icon: "fa-chess-knight", label: "Ход в бою (тактика)" },
+  { kind: "who", icon: "fa-circle-question", label: "GMW.TokenHud.Who" },
+  { kind: "line", icon: "fa-comment-dots", label: "GMW.TokenHud.Line" },
+  { kind: "tactics", icon: "fa-chess-knight", label: "GMW.TokenHud.Tactics" },
 ];
 
 async function ask(token, kind) {
   await openPanel();
   const panel = foundry.applications.instances?.get?.("gm-whispers-panel");
   if (!panel) return;
-  if (panel.busy) return ui.notifications.warn("GM Whispers: дождись ответа на предыдущий вопрос.");
+  if (panel.busy) return ui.notifications.warn(T("GMW.Panel.Busy"));
   panel.askAboutToken(token, kind);
 }
 
@@ -32,7 +33,7 @@ export function registerTokenHud() {
     button.className = "control-icon";
     button.dataset.action = "togglePalette";
     button.dataset.palette = "gm-whispers";
-    button.dataset.tooltip = "GM Whispers — спросить о токене";
+    button.dataset.tooltip = T("GMW.TokenHud.Tooltip");
     button.setAttribute("aria-label", "GM Whispers");
     button.innerHTML = '<i class="fa-solid fa-hat-wizard" inert></i>';
 
@@ -42,7 +43,7 @@ export function registerTokenHud() {
     for (const it of ITEMS) {
       const a = document.createElement("a");
       a.className = "palette-list-entry";
-      a.innerHTML = `<i class="fa-solid ${it.icon}"></i> <span>${it.label}</span>`;
+      a.innerHTML = `<i class="fa-solid ${it.icon}"></i> <span>${T(it.label)}</span>`;
       a.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();

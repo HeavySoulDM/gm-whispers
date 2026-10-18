@@ -7,23 +7,12 @@ import { MODULE_ID, htmlToText, request } from "./api.js";
 import { gatherContext } from "./context.js";
 import { esc, renderMarkdown } from "./md.js";
 import { diarySummaries } from "./prep.js";
+import { T, TRu } from "./i18n.js";
 
-const FALLBACK = {
-  "GMW.Bible.Name": "GM Whispers · Библия кампании", "GMW.Bible.Folder": "GM Whispers · Библия",
-  "GMW.Bible.Permanent": "Постоянное", "GMW.Bible.Current": "Текущее положение",
-  "GMW.Bible.Title": "Собрать Библию кампании", "GMW.Bible.Go": "Собрать", "GMW.Bible.Working": "Собираю Библию кампании (1–3 мин)",
-  "GMW.Bible.FeedTitle": "📖 Библия кампании", "GMW.Bible.NoQuentas": "— без квент —",
-  "GMW.Bible.PermanentNote": "Эту страницу правит мастер. Модуль её не меняет. Сюда — то, что всегда верно: партия, ключевые NPC, правила стола.",
-  "GMW.Bible.CurrentNote": "Эту страницу модуль переписывает после каждых «Итогов». Что хочешь сохранить навсегда — перенеси в «Постоянное».",
-};
-function t(key, data) {
-  let s = game.i18n?.localize?.(key);
-  if (!s || s === key) s = FALLBACK[key] ?? key;
-  return data ? s.replace(/\{(\w+)\}/g, (_m, k) => (k in data ? String(data[k]) : `{${k}}`)) : s;
-}
+export function bibleEntryName() { return T("GMW.Bible.Name"); }
 
 export function bibleEntry() {
-  return game.journal.find(j => j.getFlag(MODULE_ID, "bible")) ?? game.journal.find(j => j.name === t("GMW.Bible.Name")) ?? null;
+  return game.journal.find(j => j.getFlag(MODULE_ID, "bible")) ?? game.journal.find(j => j.name === T("GMW.Bible.Name")) ?? null;
 }
 
 function pageOf(entry, part) {
@@ -34,7 +23,8 @@ function pageOf(entry, part) {
 export function getBible() {
   const entry = bibleEntry();
   if (!entry) return null;
-  const strip = (txt, key) => txt.replace(t(key), "").replace(FALLBACK[key] ?? "\u0000", "").trim();
+  // Служебную пометку убираем и на языке интерфейса, и русскую (библия могла быть собрана при другом языке).
+  const strip = (txt, key) => txt.replace(T(key), "").replace(TRu(key) ?? "\u0000", "").trim();
   const permanent = strip(htmlToText(pageOf(entry, "permanent")?.text?.content), "GMW.Bible.PermanentNote");
   const current = strip(htmlToText(pageOf(entry, "current")?.text?.content), "GMW.Bible.CurrentNote");
   if (!permanent && !current) return null;
@@ -46,7 +36,7 @@ function mdToPage(md) {
 }
 
 async function bibleFolder() {
-  const name = t("GMW.Bible.Folder");
+  const name = T("GMW.Bible.Folder");
   let folder = game.folders.find(f => f.type === "JournalEntry" && f.name === name);
   if (!folder) {
     folder = await Folder.create({ name, type: "JournalEntry", color: "#4a2a5b" });
@@ -58,7 +48,7 @@ async function bibleFolder() {
   return folder;
 }
 
-function quentaFolders() {
+export function quentaFolders() {
   return game.folders.filter(f => f.type === "JournalEntry").sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang));
 }
 
@@ -76,32 +66,44 @@ function collectQuentas(folderId) {
   return out;
 }
 
-/** Открыть библию или собрать первую версию. panel — панель советника (лента, статус). */
+/** Папка с предысториями персонажей: сохранённая, иначе угаданная по названию. */
+export function guessQuentaFolder() {
+  const saved = String(game.settings.get(MODULE_ID, "bibleQuentaFolder") || "");
+  const folders = quentaFolders();
+  return folders.find(f => f.id === saved) ?? folders.find(f => /квент|backstor|предыстор/i.test(f.name)) ?? null;
+}
+
+/** Открыть библию или собрать первую версию через диалог (консоль/макросы: game.gmWhispers.bible()). */
 export async function openOrBuildBible(panel, { rebuild = false } = {}) {
   const existing = bibleEntry();
   if (existing && !rebuild) return existing.sheet?.render({ force: true });
   if (panel?.busy) return;
   const { DialogV2 } = foundry.applications.api;
-  const saved = String(game.settings.get(MODULE_ID, "bibleQuentaFolder") || "");
   const folders = quentaFolders();
-  const guess = folders.find(f => f.id === saved) ?? folders.find(f => /квент|backstor|предыстор/i.test(f.name));
+  const guess = guessQuentaFolder();
   const content = `
-    <p class="hint">${esc(t("GMW.Bible.Intro"))}</p>
-    <div class="form-group"><label>${esc(t("GMW.Bible.Quentas"))}</label>
-      <select name="folder"><option value="">${esc(t("GMW.Bible.NoQuentas"))}</option>${folders.map(f => `<option value="${esc(f.id)}" ${f.id === guess?.id ? "selected" : ""}>${esc(f.name)}</option>`).join("")}</select></div>
-    <div class="form-group"><label>${esc(t("GMW.Bible.Summaries"))}</label>
+    <p class="hint">${esc(T("GMW.Bible.Intro"))}</p>
+    <div class="form-group"><label>${esc(T("GMW.Bible.Quentas"))}</label>
+      <select name="folder"><option value="">${esc(T("GMW.Bible.NoQuentas"))}</option>${folders.map(f => `<option value="${esc(f.id)}" ${f.id === guess?.id ? "selected" : ""}>${esc(f.name)}</option>`).join("")}</select></div>
+    <div class="form-group"><label>${esc(T("GMW.Bible.Summaries"))}</label>
       <select name="count">${[0, 2, 4].map(n => `<option value="${n}" ${n === 4 ? "selected" : ""}>${n}</option>`).join("")}</select></div>`;
   let data;
   try {
-    data = await DialogV2.input({ window: { title: t("GMW.Bible.Title"), icon: "fas fa-book" }, content, ok: { label: t("GMW.Bible.Go"), icon: "fas fa-book" }, rejectClose: false });
+    data = await DialogV2.input({ window: { title: T("GMW.Bible.Title"), icon: "fas fa-book" }, content, ok: { label: T("GMW.Bible.Go"), icon: "fas fa-book" }, rejectClose: false });
   } catch (_) { return; }
   if (!data) return;
-  const folderId = String(data.folder ?? "");
+  return buildBible(panel, { folderId: String(data.folder ?? ""), count: Number(data.count) || 0 });
+}
+
+/** Собрать (или пересобрать) библию без вопросов. Старая версия не удаляется, а переименовывается. */
+export async function buildBible(panel, { folderId = "", count = 4 } = {}) {
+  if (panel?.busy) return;
+  const existing = bibleEntry();
   await game.settings.set(MODULE_ID, "bibleQuentaFolder", folderId);
   const quentas = collectQuentas(folderId);
-  const summaries = diarySummaries(Number(data.count) || 0);
+  const summaries = diarySummaries(count);
   const party = gatherContext({ includeScene: false })?.party ?? [];
-  const item = { question: t("GMW.Bible.FeedTitle"), pending: true, started: Date.now(), phase: t("GMW.Bible.Working"), indeterminate: true };
+  const item = { question: T("GMW.Bible.FeedTitle"), pending: true, started: Date.now(), phase: T("GMW.Bible.Working"), indeterminate: true };
   panel.pushItem(item);
   panel.busy = true;
   panel.render();
@@ -109,21 +111,21 @@ export async function openOrBuildBible(panel, { rebuild = false } = {}) {
     const res = await request("/bible/build", { method: "POST", body: { quentas, party, summaries, lang: game.i18n.lang }, timeout: 620000 });
     const folder = await bibleFolder();
     if (existing) { // пересборка: старую версию не удаляем, а убираем в сторону
-      await existing.update({ name: `${existing.name} (до ${new Date().toLocaleDateString(game.i18n.lang)})`, [`flags.${MODULE_ID}.-=bible`]: null });
+      await existing.update({ name: `${existing.name} (${T("GMW.Bible.Before", { date: new Date().toLocaleDateString(game.i18n.lang) })})`, [`flags.${MODULE_ID}.-=bible`]: null });
     }
-    const note = (key) => `<p><em>${esc(t(key))}</em></p>`;
+    const note = (key) => `<p><em>${esc(T(key))}</em></p>`;
     const entry = await JournalEntry.create({
-      name: t("GMW.Bible.Name"),
+      name: T("GMW.Bible.Name"),
       folder: folder.id,
       ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE },
       flags: { [MODULE_ID]: { bible: { builtAt: Date.now(), quentas: quentas.length, summaries: summaries.length } } },
       pages: [
-        { name: t("GMW.Bible.Permanent"), type: "text", flags: { [MODULE_ID]: { part: "permanent" } }, text: { content: note("GMW.Bible.PermanentNote") + mdToPage(res.permanent), format: CONST.JOURNAL_ENTRY_PAGE_FORMATS.HTML } },
-        { name: t("GMW.Bible.Current"), type: "text", flags: { [MODULE_ID]: { part: "current" } }, text: { content: note("GMW.Bible.CurrentNote") + mdToPage(res.current), format: CONST.JOURNAL_ENTRY_PAGE_FORMATS.HTML } },
+        { name: T("GMW.Bible.Permanent"), type: "text", flags: { [MODULE_ID]: { part: "permanent" } }, text: { content: note("GMW.Bible.PermanentNote") + mdToPage(res.permanent), format: CONST.JOURNAL_ENTRY_PAGE_FORMATS.HTML } },
+        { name: T("GMW.Bible.Current"), type: "text", flags: { [MODULE_ID]: { part: "current" } }, text: { content: note("GMW.Bible.CurrentNote") + mdToPage(res.current), format: CONST.JOURNAL_ENTRY_PAGE_FORMATS.HTML } },
       ],
     });
     Object.assign(item, { pending: false, answer: `${res.permanent}\n\n---\n\n${res.current}`, citations: [], usage: res.usage, seconds: res.seconds, journalUuid: entry.uuid, journalName: entry.name });
-    ui.notifications.info(`GM Whispers: ${t("GMW.Bible.Done")}`);
+    ui.notifications.info(`GM Whispers: ${T("GMW.Bible.Done")}`);
     entry.sheet?.render({ force: true });
   } catch (err) {
     Object.assign(item, { pending: false, error: err.message });
@@ -141,10 +143,10 @@ export async function updateBibleAfterSummary(summaryMarkdown) {
   if (!cur) return null;
   const bible = getBible() ?? { permanent: "", current: "" };
   const res = await request("/bible/update", { method: "POST", body: { permanent: bible.permanent, current: bible.current, summary: summaryMarkdown, lang: game.i18n.lang }, timeout: 320000 });
-  const note = `<p><em>${esc(t("GMW.Bible.CurrentNote"))}</em></p>`;
+  const note = `<p><em>${esc(T("GMW.Bible.CurrentNote"))}</em></p>`;
   await cur.update({ "text.content": note + mdToPage(res.current) });
   await entry.setFlag(MODULE_ID, "bible.updatedAt", Date.now());
   const hasSuggestions = /^##\s*(Предложения в постоянное|Suggestions)/im.test(res.current);
-  ui.notifications.info(`GM Whispers: ${t("GMW.Bible.Updated")}${hasSuggestions ? ` — ${t("GMW.Bible.Suggestions")}` : ""}.`);
+  ui.notifications.info(`GM Whispers: ${T("GMW.Bible.Updated")}${hasSuggestions ? ` — ${T("GMW.Bible.Suggestions")}` : ""}.`);
   return res;
 }

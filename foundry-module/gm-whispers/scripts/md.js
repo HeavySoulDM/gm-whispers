@@ -4,6 +4,8 @@
  * в журнале — ссылки Foundry @UUID[...]{n}.
  */
 
+import { T } from "./i18n.js";
+
 export function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -63,5 +65,5 @@ export function renderMarkdown(md, { citations = [], journal = false } = {}) {
 export function sourcesHtml(citations = []) {
   if (!citations.length) return "";
   const items = citations.map(c => `<li>@UUID[${c.uuid}]{${esc(String(c.title).replace(/[{}\[\]]/g, ""))}} <em>(${esc(c.source)})</em></li>`).join("");
-  return `<h3>Источники</h3><ol>${items}</ol>`;
+  return `<h3>${esc(T("GMW.Common.Sources"))}</h3><ol>${items}</ol>`;
 }

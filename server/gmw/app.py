@@ -80,7 +80,7 @@ async def private_network(request: Request, call_next):
 
 def auth(x_gmw_token: str = Header(default="")) -> None:
     if not x_gmw_token or not secrets.compare_digest(x_gmw_token, settings.local_token):
-        raise HTTPException(status_code=401, detail="Неверный локальный токен. Скопируй GMW_LOCAL_TOKEN из server/.env в настройки модуля.")
+        raise HTTPException(status_code=401, detail="Неверный код доступа. Скопируй его из окна сервера (GMW_LOCAL_TOKEN в server/.env) в настройки модуля: ⚙ → Подключение.")
 
 
 class PageIn(BaseModel):
@@ -203,7 +203,7 @@ async def index():
         "<body style='font:15px/1.5 system-ui;max-width:40em;margin:3em auto;color:#eee;background:#1e1c22'>"
         f"<h2>GM Whispers Core {__version__} работает</h2>"
         "<p>Сервер ждёт запросов от модуля Foundry на этом компьютере. Панель советника — в Foundry (Alt+G).</p>"
-        "<p>Настройки, ключи и модели — там же: панель → ⚙ «Настройки сервера».</p></body>"
+        "<p>Настройки, ключи и модели — там же: панель → ⚙.</p></body>"
     )
 
 
@@ -257,7 +257,7 @@ async def settings_models(body: ModelsIn):
     except LLMError as e:
         raise HTTPException(e.status, e.message)
     except asyncio.TimeoutError:
-        raise HTTPException(504, "Провайдер не ответил за 40 с")
+        raise HTTPException(504, "Сервис ИИ не ответил за 40 с")
     return {"provider": provider, "models": ids, "defaults": DEFAULT_MODELS[provider]}
 
 
@@ -289,9 +289,9 @@ async def ask(body: AskIn):
     if not q:
         raise HTTPException(400, "Пустой вопрос")
     if not kb.chunks:
-        raise HTTPException(409, "База знаний пуста. Нажми «База» в панели GM Whispers.")
+        raise HTTPException(409, "База знаний пуста — она соберётся сама через минуту; если нет, нажми «Пересобрать базу» в настройках.")
     if not has_key(model_for(body.role)):
-        raise HTTPException(409, "Ключ API не задан. Открой «Настройки сервера» в панели GM Whispers и впиши ключ.")
+        raise HTTPException(409, "Ключ API не задан. Открой настройки (⚙) в панели GM Whispers и впиши ключ.")
     try:
         result = await asyncio.wait_for(advisor.ask(kb, q, body.context, body.history, body.role, body.lang, body.bible), ASK_TIMEOUT)
     except LLMError as e:
@@ -313,9 +313,9 @@ async def ask_stream(body: AskIn):
     if not q:
         raise HTTPException(400, "Пустой вопрос")
     if not kb.chunks:
-        raise HTTPException(409, "База знаний пуста. Нажми «База» в панели GM Whispers.")
+        raise HTTPException(409, "База знаний пуста — она соберётся сама через минуту; если нет, нажми «Пересобрать базу» в настройках.")
     if not has_key(model_for(body.role)):
-        raise HTTPException(409, "Ключ API не задан. Открой «Настройки сервера» в панели GM Whispers и впиши ключ.")
+        raise HTTPException(409, "Ключ API не задан. Открой настройки (⚙) в панели GM Whispers и впиши ключ.")
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -370,7 +370,7 @@ async def session_summarize(body: SummaryIn):
     if not body.session and not body.messages and not body.notes.strip():
         raise HTTPException(400, "Нет ни сообщений чата за период, ни заметок мастера.")
     if not has_key(model_for("lore")):
-        raise HTTPException(409, "Ключ API не задан. Открой «Настройки сервера» в панели GM Whispers и впиши ключ.")
+        raise HTTPException(409, "Ключ API не задан. Открой настройки (⚙) в панели GM Whispers и впиши ключ.")
     try:
         result = await session.summarize(kb, body.messages, body.notes, body.period, body.party, body.previous, body.session, body.lang, body.bible)
     except LLMError as e:
@@ -384,9 +384,9 @@ async def session_summarize(body: SummaryIn):
 async def session_prep(body: PrepIn):
     """«К игре»: сводка перед сессией."""
     if not kb.chunks:
-        raise HTTPException(409, "База знаний пуста. Нажми «База» в панели GM Whispers.")
+        raise HTTPException(409, "База знаний пуста — она соберётся сама через минуту; если нет, нажми «Пересобрать базу» в настройках.")
     if not has_key(model_for("lore")):
-        raise HTTPException(409, "Ключ API не задан. Открой «Настройки сервера» в панели GM Whispers и впиши ключ.")
+        raise HTTPException(409, "Ключ API не задан. Открой настройки (⚙) в панели GM Whispers и впиши ключ.")
     try:
         result = await asyncio.wait_for(prep.prepare(kb, body.summaries, body.notes, body.party, body.scene, body.lang, body.bible), 600)
     except LLMError as e:
@@ -402,7 +402,7 @@ async def session_prep(body: PrepIn):
 async def bible_build(body: BibleBuildIn):
     """Первая версия Библии кампании по квентам, партии и итогам."""
     if not has_key(model_for("lore")):
-        raise HTTPException(409, "Ключ API не задан. Открой «Настройки сервера» в панели GM Whispers и впиши ключ.")
+        raise HTTPException(409, "Ключ API не задан. Открой настройки (⚙) в панели GM Whispers и впиши ключ.")
     try:
         result = await asyncio.wait_for(bible.build(kb, body.quentas, body.party, body.summaries, body.lang), 600)
     except LLMError as e:
@@ -472,5 +472,5 @@ async def craig_jobs():
 @app.post("/craig/sync", dependencies=[Depends(auth)])
 async def craig_sync():
     if not inbox.enabled:
-        raise HTTPException(400, "Папка записей Craig не задана. Открой «Настройки сервера» в панели GM Whispers.")
+        raise HTTPException(400, "Папка записей Craig не задана. Открой настройки (⚙) → Транскрибация.")
     return await inbox.sync()

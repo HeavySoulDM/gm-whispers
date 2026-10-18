@@ -3,6 +3,8 @@
  * Адрес и токен — клиентские настройки (хранятся только в браузере мастера, в мир не попадают).
  */
 
+import { T } from "./i18n.js";
+
 export const MODULE_ID = "gm-whispers";
 
 export function serverUrl() {
@@ -21,7 +23,7 @@ export class ServerError extends Error {
 }
 
 export async function request(path, { method = "GET", body, timeout = 180000 } = {}) {
-  if (!token()) throw new ServerError("Не задан локальный токен. Настройки → GM Whispers → «Локальный токен» (GMW_LOCAL_TOKEN из server/.env).", 401);
+  if (!token()) throw new ServerError(T("GMW.Api.NoToken"), 401);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   let res;
@@ -33,14 +35,14 @@ export async function request(path, { method = "GET", body, timeout = 180000 } =
       signal: ctrl.signal,
     });
   } catch (err) {
-    if (err.name === "AbortError") throw new ServerError("Сервер не ответил вовремя.");
-    throw new ServerError(`Нет связи с сервером ${serverUrl()}. Запущен ли start.bat?`);
+    if (err.name === "AbortError") throw new ServerError(T("GMW.Api.Timeout"));
+    throw new ServerError(T("GMW.Api.NoConnection", { url: serverUrl() }));
   } finally {
     clearTimeout(timer);
   }
   let data = null;
   try { data = await res.json(); } catch (_) { /* пустой ответ */ }
-  if (!res.ok) throw new ServerError(data?.detail || `Ошибка сервера ${res.status}`, res.status);
+  if (!res.ok) throw new ServerError(data?.detail || T("GMW.Api.ServerError", { status: res.status }), res.status);
   return data;
 }
 
@@ -52,7 +54,7 @@ export const health = () => request("/health", { timeout: 8000 });
  * чтобы вызывающий мог откатиться на обычный /ask.
  */
 export async function askStream(payload, onEvent, { timeout = 190000 } = {}) {
-  if (!token()) throw new ServerError("Не задан локальный токен. Настройки → GM Whispers → «Локальный токен».", 401);
+  if (!token()) throw new ServerError(T("GMW.Api.NoToken"), 401);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   let res;
@@ -65,14 +67,14 @@ export async function askStream(payload, onEvent, { timeout = 190000 } = {}) {
     });
   } catch (err) {
     clearTimeout(timer);
-    if (err.name === "AbortError") throw new ServerError("Сервер не ответил вовремя.");
-    throw new ServerError(`Нет связи с сервером ${serverUrl()}. Запущен ли start.bat?`);
+    if (err.name === "AbortError") throw new ServerError(T("GMW.Api.Timeout"));
+    throw new ServerError(T("GMW.Api.NoConnection", { url: serverUrl() }));
   }
   if (!res.ok) {
     clearTimeout(timer);
     let data = null;
     try { data = await res.json(); } catch (_) { /* пусто */ }
-    throw new ServerError(data?.detail || `Ошибка сервера ${res.status}`, res.status);
+    throw new ServerError(data?.detail || T("GMW.Api.ServerError", { status: res.status }), res.status);
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -90,7 +92,7 @@ export async function askStream(payload, onEvent, { timeout = 190000 } = {}) {
         if (!line) continue;
         let ev;
         try { ev = JSON.parse(line); } catch (_) { continue; }
-        if (ev.type === "error") throw new ServerError(ev.message || "Ошибка модели", ev.status || 502);
+        if (ev.type === "error") throw new ServerError(ev.message || T("GMW.Api.ModelError"), ev.status || 502);
         if (ev.type === "done") { result = ev; break; }
         if (ev.type !== "ping") onEvent?.(ev);
       }
@@ -100,7 +102,7 @@ export async function askStream(payload, onEvent, { timeout = 190000 } = {}) {
     clearTimeout(timer);
     try { reader.cancel(); } catch (_) { /* уже закрыт */ }
   }
-  if (!result) throw new ServerError("Поток ответа оборвался.");
+  if (!result) throw new ServerError(T("GMW.Api.StreamBroken"));
   return result;
 }
 export const ask = (payload) => request("/ask", { method: "POST", body: payload });

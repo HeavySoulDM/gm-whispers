@@ -5,7 +5,8 @@ rem Скачивает модель распознавания речи для G
 rem Можно указать другой адрес-зеркало: download_model.bat https://hf-mirror.com/mobiuslabsgmbh/faster-whisper-large-v3-turbo/resolve/main
 for %%I in ("%~dp0..\data\models\faster-whisper-large-v3-turbo") do set "DIR=%%~fI"
 set "BASE=https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo/resolve/main"
-if not "%~1"=="" set "BASE=%~1"
+set "QUIET="
+if /i "%~1"=="/quiet" (set "QUIET=1") else if not "%~1"=="" set "BASE=%~1"
 if not exist "%DIR%" mkdir "%DIR%"
 echo Папка: %DIR%
 echo Источник: %BASE%
@@ -35,8 +36,8 @@ goto retry
 
 :ok
 echo.
-echo Готово: модель на месте ^(!SIZE! байт^). Теперь можно перетаскивать запись на server\transcribe.bat
-pause
+echo Готово: модель на месте ^(!SIZE! байт^).
+if not defined QUIET pause
 exit /b 0
 
 :fail
@@ -44,7 +45,7 @@ echo.
 echo Не удалось скачать за 20 попыток. Попробуй зеркало:
 echo   download_model.bat https://hf-mirror.com/mobiuslabsgmbh/faster-whisper-large-v3-turbo/resolve/main
 echo или включи VPN и запусти снова - скачанное не пропадёт, продолжится с места обрыва.
-pause
+if not defined QUIET pause
 exit /b 1
 
 :size

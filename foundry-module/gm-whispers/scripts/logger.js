@@ -7,6 +7,7 @@
  */
 
 import { MODULE_ID, isNoise, request, stripHtml } from "./api.js";
+import { T } from "./i18n.js";
 
 const QUEUE_KEY = "gm-whispers.eventQueue";
 const FLUSH_MS = 10000;
@@ -25,7 +26,7 @@ function strip(html, max = 400) {
 
 function enabled() {
   try {
-    return game.user.isGM && game.users.activeGM?.id === game.user.id && game.settings.get(MODULE_ID, "logSession");
+    return game.user.isGM && game.users.activeGM?.id === game.user.id; // журнал ведётся всегда — без него нет «Итогов»
   } catch (_) {
     return false;
   }
@@ -80,7 +81,7 @@ function chatEvent(m) {
     return `${r.formula} = ${total}`;
   });
   if (rolls.length && /^[\d.,\s]+$/.test(content)) content = "";
-  const text = [flavor, content, rolls.length ? `бросок ${rolls.join("; ")}` : ""].filter(Boolean).join(" — ");
+  const text = [flavor, content, rolls.length ? T("GMW.Log.Roll", { rolls: rolls.join("; ") }) : ""].filter(Boolean).join(" — ");
   const whisper = (m.whisper ?? []).map(id => game.users.get(id)?.name).filter(Boolean).join(", ");
   push(rolls.length ? "roll" : "chat", text, { who, whisper: whisper || undefined });
 }
@@ -121,19 +122,19 @@ export function registerLogger() {
 
   Hooks.on("combatStart", safe((combat) => {
     snapshotCombat(combat);
-    push("combat", `Бой начался (${combat.scene?.name ?? "сцена ?"}): ${combatantsText(combat)}`);
+    push("combat", T("GMW.Log.CombatStart", { scene: combat.scene?.name ?? T("GMW.Log.UnknownScene"), list: combatantsText(combat) }));
   }));
   Hooks.on("updateCombat", safe((combat, changed) => {
     if (!combat.started) return;
     if ("round" in changed || "turn" in changed) hpChanges(combat);
-    if ("round" in changed) push("combat", `Раунд ${combat.round}`);
+    if ("round" in changed) push("combat", T("GMW.Log.Round", { n: combat.round }));
     if ("turn" in changed || "round" in changed) {
       const c = combat.combatant;
-      if (c) push("combat", `Ход: ${c.name}`);
+      if (c) push("combat", T("GMW.Log.Turn", { name: c.name }));
     }
   }));
   Hooks.on("updateCombatant", safe((c, changed) => {
-    if (changed.defeated === true) push("combat", `${c.name} повержен`);
+    if (changed.defeated === true) push("combat", T("GMW.Log.Defeated", { name: c.name }));
   }));
   Hooks.on("deleteCombat", safe((combat) => {
     for (const c of combat.combatants) hpSnapshot.delete(c.id);
@@ -144,11 +145,11 @@ export function registerLogger() {
       const hp = c.actor?.system?.attributes?.hp;
       return hp?.max ? `${c.name} ${hp.value}/${hp.max}` : c.name;
     });
-    push("combat", `Бой окончен на раунде ${combat.round}. Повержены: ${down.join(", ") || "никто"}. На ногах: ${up.join(", ") || "никто"}`);
+    push("combat", T("GMW.Log.CombatEnd", { round: combat.round, down: down.join(", ") || T("GMW.Log.Nobody"), up: up.join(", ") || T("GMW.Log.Nobody") }));
   }));
 
   Hooks.on("updateScene", safe((scene, changed) => {
-    if (changed.active === true) push("scene", `Активная сцена: ${scene.navName || scene.name}`);
+    if (changed.active === true) push("scene", T("GMW.Log.ActiveScene", { name: scene.navName || scene.name }));
   }));
 
   Hooks.on("createItem", safe((item, _opts, userId) => {
@@ -156,7 +157,7 @@ export function registerLogger() {
     if (!actor || actor.documentName !== "Actor" || actor.type !== "character" || !actor.hasPlayerOwner) return;
     if (["class", "subclass", "background", "race", "feat", "spell"].includes(item.type)) return;
     const qty = item.system?.quantity > 1 ? ` ×${item.system.quantity}` : "";
-    push("loot", `${actor.name} получает: ${item.name}${qty}`, { who: game.users.get(userId)?.name });
+    push("loot", T("GMW.Log.Loot", { actor: actor.name, item: item.name }) + qty, { who: game.users.get(userId)?.name });
   }));
 
   timer = setInterval(flush, FLUSH_MS);

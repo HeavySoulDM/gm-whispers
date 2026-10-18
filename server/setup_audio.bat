@@ -17,6 +17,6 @@ pause
 exit /b 1
 
 :fail
-echo Ошибка установки - пришли текст выше.
+echo Ошибка установки - сообщи текст выше: https://github.com/HeavySoulDM/gm-whispers/issues
 pause
 exit /b 1

@@ -10,7 +10,7 @@
  *   game.gmWhispers.bible()      // Библия кампании: открыть или собрать; bible(true) — пересобрать
  */
 
-import { MODULE_ID, askHotkey, openPanel, refreshKnowledge } from "./panel.js";
+import { MODULE_ID, askHotkey, autoBuildKnowledgeOnReady, openPanel, refreshKnowledge } from "./panel.js";
 import { showWhatsNew } from "./changelog.js";
 import { openSummaryDialog } from "./session.js";
 import { openPrepDialog } from "./prep.js";
@@ -19,40 +19,28 @@ import { registerLogger } from "./logger.js";
 import { registerTokenHud } from "./tokenhud.js";
 import { registerKbSync } from "./kbsync.js";
 import { ServerSettingsApp, openServerSettings } from "./settings.js";
+import { maybeOpenSetup, openSetupWizard } from "./setup.js";
+import { T, preloadFallback } from "./i18n.js";
 
 Hooks.once("init", () => {
-  game.settings.register(MODULE_ID, "serverUrl", {
-    name: "Адрес сервера GM Whispers Core",
-    hint: "Обычно http://127.0.0.1:8765. Настройка хранится только в этом браузере.",
-    scope: "client", config: true, type: String, default: "http://127.0.0.1:8765",
-  });
-  game.settings.register(MODULE_ID, "token", {
-    name: "Локальный токен",
-    hint: "Значение GMW_LOCAL_TOKEN из server/.env (его печатает start.bat при запуске). Хранится только в этом браузере.",
-    scope: "client", config: true, type: String, default: "",
-  });
+  preloadFallback(); // запасной словарь, если languages из module.json ещё не подхвачены
+  // Все настройки правятся в одном окне (⚙ в панели / меню ниже); в стандартном списке Foundry их не показываем.
+  game.settings.register(MODULE_ID, "serverUrl", { scope: "client", config: false, type: String, default: "http://127.0.0.1:8765" });
+  game.settings.register(MODULE_ID, "token", { scope: "client", config: false, type: String, default: "" });
 
   game.settings.registerMenu(MODULE_ID, "serverSettings", {
-    name: "Настройки сервера",
-    label: "Открыть настройки сервера",
-    hint: "Ключи API и модели, папка записей Craig, кто есть кто в записи, что не учитывать в итогах. То же окно — кнопка ⚙ в панели советника.",
+    name: T("GMW.Settings.MenuName"),
+    label: T("GMW.Settings.MenuLabel"),
+    hint: T("GMW.Settings.MenuHint"),
     icon: "fas fa-sliders",
     type: ServerSettingsApp,
     restricted: true,
   });
 
-  game.settings.register(MODULE_ID, "logSession", {
-    name: "Вести журнал сессии",
-    hint: "Чат, ход боя, хиты, смена сцен и добыча сохраняются на сервере GM Whispers (data/sessions) — для итогов. Чистка чата на журнал не влияет.",
-    scope: "world", config: true, type: Boolean, default: true,
-  });
-
-  game.settings.register(MODULE_ID, "kbPacks", {
-    name: "Компендиумы в базе знаний",
-    hint: "Удобнее отмечать галочками в ⚙ «Настройки сервера» → Источники знаний. Здесь — id через запятую. После изменения нажми «База».",
-    scope: "world", config: true, type: String,
-    default: "",
-  });
+  // Журнал сессии нужен для «Итогов» — ведётся всегда (поле оставлено для совместимости со старыми мирами).
+  game.settings.register(MODULE_ID, "logSession", { scope: "world", config: false, type: Boolean, default: true });
+  // Компендиумы в базе знаний: id через запятую; отмечаются галочками в окне настроек → Кампания → Источники.
+  game.settings.register(MODULE_ID, "kbPacks", { scope: "world", config: false, type: String, default: "" });
   game.settings.register(MODULE_ID, "kbSources", {
     // Вид источника по id папки журналов ("" — журналы без папки): gm / diary / adventure / setting / rules / other / exclude / auto.
     scope: "world", config: false, type: Object, default: {},
@@ -60,11 +48,11 @@ Hooks.once("init", () => {
   game.settings.register(MODULE_ID, "bibleQuentaFolder", {
     scope: "world", config: false, type: String, default: "",
   });
-  game.settings.register(MODULE_ID, "kbAutoSync", {
-    name: "Автообновление базы знаний",
-    hint: "Правки журналов мира сразу попадают в базу советника — без кнопки «База».",
-    scope: "world", config: true, type: Boolean, default: true,
-  });
+  // Автообновление базы включено всегда (поле оставлено для совместимости).
+  game.settings.register(MODULE_ID, "kbAutoSync", { scope: "world", config: false, type: Boolean, default: true });
+
+  // Мастер первого запуска пройден (или мир был настроен до его появления).
+  game.settings.register(MODULE_ID, "setupDone", { scope: "world", config: false, type: Boolean, default: false });
 
   game.settings.register(MODULE_ID, "lastSummaryAt", {
     scope: "world", config: false, type: Number, default: 0,
@@ -77,21 +65,21 @@ Hooks.once("init", () => {
   });
 
   game.keybindings.register(MODULE_ID, "openPanel", {
-    name: "Открыть советника GM Whispers",
+    name: T("GMW.Keybinds.OpenPanel"),
     editable: [{ key: "KeyG", modifiers: ["Alt"] }],
     restricted: true,
     onDown: () => { openPanel(); return true; },
   });
   game.keybindings.register(MODULE_ID, "tacticsToken", {
-    name: "GM Whispers: тактика для выделенного токена",
-    hint: "Варианты хода для выделенного токена (или того, чей ход в бою).",
+    name: T("GMW.Keybinds.Tactics"),
+    hint: T("GMW.Keybinds.TacticsHint"),
     editable: [{ key: "KeyT", modifiers: ["Alt"] }],
     restricted: true,
     onDown: () => { askHotkey("tactics"); return true; },
   });
   game.keybindings.register(MODULE_ID, "lineToken", {
-    name: "GM Whispers: реплика выделенного токена",
-    hint: "2–3 реплики, которые NPC может сказать прямо сейчас.",
+    name: T("GMW.Keybinds.Line"),
+    hint: T("GMW.Keybinds.LineHint"),
     editable: [{ key: "KeyR", modifiers: ["Alt"] }],
     restricted: true,
     onDown: () => { askHotkey("line"); return true; },
@@ -105,7 +93,7 @@ Hooks.once("init", () => {
     if (!group?.tools) return;
     group.tools[MODULE_ID] = {
       name: MODULE_ID,
-      title: "GM Whispers — советник",
+      title: T("GMW.Panel.ControlTitle"),
       icon: "fas fa-hat-wizard",
       button: true,
       order: 99,
@@ -122,6 +110,7 @@ Hooks.once("ready", () => {
     open: openPanel,
     refreshKb: refreshKnowledge,
     settings: openServerSettings,
+    setup: openSetupWizard,
     prep: async () => { const panel = await openPanel(); if (panel) openPrepDialog(panel); },
     bible: async (rebuild = false) => { const panel = await openPanel(); if (panel) openOrBuildBible(panel, { rebuild }); },
     summary: async () => {
@@ -131,5 +120,7 @@ Hooks.once("ready", () => {
     },
   };
   console.log(`${MODULE_ID} | готов: game.gmWhispers.open()`);
+  setTimeout(() => autoBuildKnowledgeOnReady(), 5000); // даём миру догрузиться
+  setTimeout(() => maybeOpenSetup().catch(e => console.warn(`${MODULE_ID} | мастер настройки`, e)), 2500);
   showWhatsNew().catch(e => console.warn(`${MODULE_ID} | что нового`, e));
 });

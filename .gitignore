@@ -13,3 +13,9 @@ server/build/
 node_modules/
 *.tmp
 # прод-билд собирается в соседнюю папку, в репозиторий не попадает
+# внутренняя документация разработки (планы, инструкции для ИИ-ассистента) — остаётся только локально
+CLAUDE.md
+docs/ROADMAP.md
+docs/PLAN.md
+docs/ARCHITECTURE.md
+docs/DEV_README.md

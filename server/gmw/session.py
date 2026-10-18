@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 
 from . import campaign
+from . import prompts_en as en
 from .advisor import TOOLS, collect_citations, make_tools
 from .kb import KnowledgeBase
 from .llm import model_for, run_tool_loop
@@ -174,7 +175,7 @@ async def summarize(
     t0 = time.time()
     model = model_for("lore")
     usage = Usage(model)
-    run_tool, reg, tool_log = make_tools(kb)
+    run_tool, reg, tool_log = make_tools(kb, english=campaign.is_english(lang))
 
     stats = {"events": 0, "voice": 0, "messages": len(messages)}
     if session_id:
@@ -207,7 +208,7 @@ async def summarize(
         async def one(i: int, part: str) -> str:
             async with sem:
                 text = await run_tool_loop(
-                    model, campaign.render(PART_SYSTEM, lang, style=False), [], f"Фрагмент {i} из {len(parts)}:\n{part}", [], lambda *_: "", usage,
+                    model, campaign.render({"ru": PART_SYSTEM, "en": en.PART_SYSTEM}, lang, style=False), [], (f"Fragment {i} of {len(parts)}:\n{part}" if campaign.is_english(lang) else f"Фрагмент {i} из {len(parts)}:\n{part}"), [], lambda *_: "", usage,
                     max_rounds=1, max_tokens=2500,
                 )
                 return f"### Часть {i}\n{text}"
@@ -218,7 +219,7 @@ async def summarize(
         body = f"Шкала времени сессии:\n{transcript}" if transcript else "Лог пуст — опирайся на заметки мастера."
 
     user_text = (head + "\n\n" if head else "") + body + "\n\nСоставь итоги сессии по формату."
-    answer = await run_tool_loop(model, campaign.render(SUMMARY_SYSTEM, lang, bible, style=False), [], user_text, TOOLS, run_tool, usage, max_rounds=3, max_tokens=3500)
+    answer = await run_tool_loop(model, campaign.render({"ru": SUMMARY_SYSTEM, "en": en.SUMMARY_SYSTEM}, lang, bible, style=False), [], user_text, TOOLS, run_tool, usage, max_rounds=3, max_tokens=3500)
     answer = answer or "Не удалось составить итоги."
     cited = collect_citations(answer, reg)
 
