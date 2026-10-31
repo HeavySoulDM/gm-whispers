@@ -115,6 +115,8 @@ export class SetupWizard extends ServerSettingsApp {
         <div class="gmw-field"><label>${T("GMW.Settings.SpeechLang")}</label>
           <select name="whisper_language">${[["ru", "GMW.Settings.LangRu"], ["en", "GMW.Settings.LangEn"], ["auto", "GMW.Setup.SpeechAuto"]].map(([v, t]) => `<option value="${v}" ${v === (d.whisper_language || "ru") ? "selected" : ""}>${T(t)}</option>`).join("")}</select></div>
       </div>
+      <h4>${T("GMW.Voice.Legend")}</h4>
+      ${this._voiceHTML()}
       <input type="hidden" name="ignore_voice" value="${esc((d.ignore?.voice ?? []).join(", "))}">
       <input type="hidden" name="ignore_chat" value="${esc((d.ignore?.chat ?? []).join(", "))}">`;
   }

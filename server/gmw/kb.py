@@ -207,6 +207,10 @@ def classify(folder: str, entry: str, kind: str | None = None):
         return None
     if kind in KINDS:
         return kind, KINDS[kind]["label"], KINDS[kind]["weight"]
+    # Папки, которые модуль создаёт сам (на языке Foundry): дневник — «Дневник кампании», остальное (К игре, раздатки) — материалы ГМа.
+    if folder.startswith("GM Whispers"):
+        k = "diary" if re.search(r"дневник|diary", folder, re.IGNORECASE) else "gm"
+        return k, KINDS[k]["label"], KINDS[k]["weight"]
     rules, default = _load_rules()
     key = f"{folder} / {entry}" if folder else entry
     for rx, rule in rules:
@@ -428,9 +432,12 @@ class KnowledgeBase:
     def flush(self) -> None:
         """Записать отложенные изменения сейчас (вызывается таймером и при остановке сервера)."""
         with self._lock:
+            pending = self._save_timer is not None
             if self._save_timer:
                 self._save_timer.cancel()
                 self._save_timer = None
+            if not pending and not self.pages and not self.path.exists():
+                return  # пустая база, которую ни разу не собирали — файл не нужен
             try:
                 self.save()
             except OSError as e:

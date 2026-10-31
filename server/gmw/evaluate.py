@@ -101,11 +101,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--tag", help="только вопросы с этой меткой")
     ap.add_argument("--limit", type=int, default=8)
     ap.add_argument("--save", action="store_true", help="сохранить результат в data/logs")
+    ap.add_argument("--world", help="id мира Foundry (папка в data/worlds); по умолчанию — последний мир, обращавшийся к серверу")
     args = ap.parse_args(argv)
 
-    kb = KnowledgeBase(settings.kb_dir)
+    from . import worlds
+
+    w = worlds.for_transcribe(args.world)
+    worlds.set_current(w)
+    kb = w.kb
     if not kb.chunks:
-        print("База знаний пуста: запусти сервер и нажми «База» в панели.")
+        print(f"База знаний мира {w.id or '(общие данные)'} пуста: запусти сервер и открой панель в Foundry — база соберётся сама.")
         return 1
     qs = load_questions(args.tag)
     if not qs:

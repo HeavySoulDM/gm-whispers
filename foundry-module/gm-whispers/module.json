@@ -2,7 +2,7 @@
   "id": "gm-whispers",
   "title": "GM Whispers",
   "description": "ИИ-помощник мастера: советник по приключению и правилам со ссылками на страницы, тактика по карте, итоги сессии в дневник, расшифровка записей Craig. Только у мастера; нужен локальный сервер GM Whispers Core.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "authors": [
     {
       "name": "Di"
@@ -29,5 +29,14 @@
       "name": "English",
       "path": "lang/en.json"
     }
-  ]
+  ],
+  "relationships": {
+    "recommends": [
+      {
+        "id": "polyglot",
+        "type": "module",
+        "reason": "Раздатки на языках мира: игроки без языка видят нечитаемые знаки. / Handouts in world languages."
+      }
+    ]
+  }
 }

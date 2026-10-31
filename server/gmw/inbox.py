@@ -21,6 +21,7 @@ import zipfile
 from collections import deque
 from pathlib import Path
 
+from . import worlds
 from .config import DATA_DIR, FROZEN, SERVER_DIR
 
 STATE_PATH = DATA_DIR / "craig_inbox.json"
@@ -139,7 +140,7 @@ class CraigInbox:
     def _imported_names(self) -> set[str]:
         """Имена архивов, уже лежащих в расшифровках сессий (в т. ч. импортированные вручную через transcribe.bat)."""
         names: set[str] = set()
-        for tr in (DATA_DIR / "sessions").glob("*/transcript.json"):
+        for tr in worlds.all_transcript_files():
             try:
                 src = json.loads(tr.read_text(encoding="utf-8")).get("source") or ""
             except (OSError, ValueError):
@@ -191,17 +192,17 @@ class CraigInbox:
 
     # ---------------------------------------------------------------- обработка
 
-    async def sync(self) -> dict:
-        """Забрать все новые записи (в фоне, по очереди). Ход — в status()['jobs']."""
+    async def sync(self, world: str = "") -> dict:
+        """Забрать все новые записи (в фоне, по очереди) в сессии мира world. Ход — в status()['jobs']."""
         if self.running:
             return {"started": False, "message": "Обработка уже идёт."}
         files = await self.candidates(fresh=True)
         if not files:
             return {"started": False, "message": "Новых записей Craig в папке нет."}
-        self._task_sync = asyncio.create_task(self._sync_all(files))
+        self._task_sync = asyncio.create_task(self._sync_all(files, world))
         return {"started": True, "files": [p.name for p in files]}
 
-    async def _sync_all(self, files: list[Path]) -> None:
+    async def _sync_all(self, files: list[Path], world: str = "") -> None:
         for p in files:
             try:
                 # Если облако ещё докачивает файл — подождём, пока размер перестанет меняться.
@@ -210,7 +211,7 @@ class CraigInbox:
                     await asyncio.sleep(3)
                     if p.stat().st_size == a:
                         break
-                await self.process(p, f"{p.name}|{p.stat().st_size}")
+                await self.process(p, f"{p.name}|{p.stat().st_size}", world)
             except Exception as e:  # noqa: BLE001 — файл исчез/переименован облаком и т. п.
                 self.jobs.append({"file": p.name, "state": "error", "started": int(time.time() * 1000),
                                   "finished": int(time.time() * 1000), "session": None, "message": f"{type(e).__name__}: {e}"})
@@ -245,9 +246,11 @@ class CraigInbox:
             await self.process(p, f"{p.name}|{st.st_size}")
             return  # по одному за проход: видеокарта одна
 
-    async def process(self, path: Path, key: str) -> None:
+    async def process(self, path: Path, key: str, world: str = "") -> None:
+        """Расшифровать запись в сессию мира world (пусто — последний мир, обращавшийся к серверу)."""
+        world = world or worlds.active_id()
         job = {"file": path.name, "state": "running", "started": int(time.time() * 1000), "session": None, "message": "",
-               "progress": {"phase": "start", "pct": 0, "at": int(time.time() * 1000)}}
+               "world": world, "progress": {"phase": "start", "pct": 0, "at": int(time.time() * 1000)}}
         self.jobs.append(job)
         safe_stem = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in path.stem)[:80]
         log_path = DATA_DIR / "logs" / f"craig-{safe_stem}.log"
@@ -260,8 +263,9 @@ class CraigInbox:
             result = None
             deadline = time.time() + PROCESS_TIMEOUT
             with open(log_path, "w", encoding="utf-8") as log:
+                extra = ["--world", world] if world else []
                 proc = subprocess.Popen(
-                    [sys.executable, "--transcribe", str(path)] if FROZEN else [sys.executable, "-m", "gmw.transcribe", str(path)],
+                    ([sys.executable, "--transcribe", str(path)] if FROZEN else [sys.executable, "-m", "gmw.transcribe", str(path)]) + extra,
                     cwd=str(SERVER_DIR), env=env,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -302,7 +306,7 @@ class CraigInbox:
         job["finished"] = int(time.time() * 1000)
         if result and result.get("ok"):
             job.update(state="done", session=result.get("session"), message=result.get("message", ""))
-            self.state["done"][key] = {"session": result.get("session"), "at": job["finished"]}
+            self.state["done"][key] = {"session": result.get("session"), "world": world, "at": job["finished"]}
             print(f"[craig] готово: {path.name} → сессия {result.get('session')}")
         else:
             job.update(state="error", message=(result or {}).get("message") or job["message"] or f"код {code}")

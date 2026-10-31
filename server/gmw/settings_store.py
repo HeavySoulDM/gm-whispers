@@ -16,7 +16,8 @@ from dotenv import load_dotenv
 
 from . import config
 from . import campaign
-from .config import ENV_PATH, IGNORE_PATH, SOURCES_PATH, SPEAKERS_PATH, settings
+from . import worlds
+from .config import ENV_PATH, SOURCES_PATH, settings
 from .kb import KINDS
 
 # Поле настроек → переменная в .env. Секреты помечены отдельно: наружу уходит только «задан/не задан».
@@ -70,8 +71,8 @@ def _write_json(path: Path, data: dict) -> None:
 
 def public() -> dict:
     """Всё, что показывает окно настроек. Секретов здесь нет."""
-    speakers = {k: v for k, v in _read_json(SPEAKERS_PATH).items() if not k.startswith("_")}
-    ignore = _read_json(IGNORE_PATH)
+    speakers = {k: v for k, v in _read_json(worlds.speakers_path()).items() if not k.startswith("_")}
+    ignore = _read_json(worlds.ignore_path())
     return {
         "keys": {
             "anthropic": _mask(settings.anthropic_api_key),
@@ -185,16 +186,16 @@ def apply(body: dict) -> dict:
         reload()
 
     if isinstance(body.get("speakers"), dict):
-        cur = _read_json(SPEAKERS_PATH)
+        cur = _read_json(worlds.speakers_path())
         keep = {k: v for k, v in cur.items() if k.startswith("_")}
         clean = {str(k).strip(): str(v).strip() for k, v in body["speakers"].items() if str(k).strip()}
-        _write_json(SPEAKERS_PATH, {**keep, **clean})
+        _write_json(worlds.speakers_path(), {**keep, **clean})
 
     if isinstance(body.get("campaign"), dict):
         campaign.save(body["campaign"])
 
     if isinstance(body.get("ignore"), dict):
-        cur = _read_json(IGNORE_PATH)
+        cur = _read_json(worlds.ignore_path())
         keep = {k: v for k, v in cur.items() if k.startswith("_")}
         out = {}
         for part in ("voice", "chat"):
@@ -202,6 +203,6 @@ def apply(body: dict) -> dict:
             if isinstance(vals, str):
                 vals = re.split(r"[,\n;]+", vals)
             out[part] = sorted({str(x).strip() for x in vals if str(x).strip()})
-        _write_json(IGNORE_PATH, {**keep, **out})
+        _write_json(worlds.ignore_path(), {**keep, **out})
 
     return public()

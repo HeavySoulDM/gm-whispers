@@ -16,6 +16,6 @@ pause
 exit /b 1
 
 :nosetup
-echo Сначала запусти setup.bat, затем setup_audio.bat
+echo Сначала запусти setup.bat
 pause
 exit /b 1

@@ -4,7 +4,7 @@
   или: python -m gmw.transcribe <zip|папка> [--session ID] [--start "2026-10-07 19:00"] [--model large-v3-turbo]
 
 Результат: data/sessions/<сессия>/transcript.txt и transcript.json — их подхватывают «Итоги» в Foundry.
-Имена говорящих берутся из имён файлов Craig и переводятся через server/config/speakers.json.
+Имена говорящих берутся из имён файлов Craig и переводятся через speakers.json мира (data/worlds/<мир>/).
 """
 
 from __future__ import annotations
@@ -20,15 +20,12 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from .config import DATA_DIR, SERVER_DIR, SPEAKERS_PATH, settings
+from . import voice, worlds
+from .config import DATA_DIR, SERVER_DIR, settings
 from .filters import load_ignore, voice_ignored
-from .sessions import SessionStore, parse_transcript_text
+from .sessions import parse_transcript_text
 
-# Новый способ раздачи файлов Hugging Face (Xet) иногда обрывается — качаем обычным HTTP с докачкой.
-os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
-os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
-MODELS_DIR = DATA_DIR / "models"
-MODEL_FILES = ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"]
+MODELS_DIR = voice.MODELS_DIR
 
 AUDIO_EXT = {".flac", ".ogg", ".opus", ".m4a", ".aac", ".mp3", ".wav"}
 
@@ -39,57 +36,17 @@ HALLUCINATIONS = re.compile(
 )
 
 
-def _add_cuda_dlls() -> None:
-    """На Windows библиотеки CUDA из pip-пакетов nvidia-* нужно явно добавить в путь поиска DLL."""
-    if os.name != "nt":
-        return
-    for base in sys.path:
-        nv = Path(base) / "nvidia"
-        if not nv.is_dir():
-            continue
-        for sub in ("cublas", "cudnn", "cuda_runtime", "cuda_nvrtc"):
-            b = nv / sub / "bin"
-            if b.is_dir():
-                os.add_dll_directory(str(b))
-                os.environ["PATH"] = str(b) + os.pathsep + os.environ.get("PATH", "")
-
-
 class ModelDownloadError(Exception):
     pass
 
 
 def ensure_model(name: str) -> str:
-    """Модель в data/models/faster-whisper-<name>. Если её нет — скачивает (с повторами и докачкой)."""
+    """Путь к модели: готовая папка или data/models/faster-whisper-<имя>; если её нет — понятная ошибка, куда положить."""
     if Path(name).is_dir():
         return name
-    from faster_whisper.utils import _MODELS
-
-    repo = _MODELS.get(name, name)
-    local = MODELS_DIR / f"faster-whisper-{name}"
-    if (local / "model.bin").exists() and (local / "config.json").exists():
-        return str(local)
-    from huggingface_hub import snapshot_download
-
-    local.mkdir(parents=True, exist_ok=True)
-    print(f"Скачиваю модель распознавания {name} (~1.6 ГБ, один раз) в {local} …", flush=True)
-    last = None
-    for attempt in range(1, 6):
-        try:
-            snapshot_download(repo, local_dir=str(local), allow_patterns=MODEL_FILES)
-            if (local / "model.bin").exists():
-                print("Модель скачана.", flush=True)
-                return str(local)
-        except Exception as e:  # noqa: BLE001
-            last = e
-            msg = str(e).split("\n")[0][:200]
-            print(f"   попытка {attempt}/5 не удалась: {msg}", flush=True)
-            time.sleep(min(30, 5 * attempt))
-    raise ModelDownloadError(
-        f"Не удалось скачать модель {repo}: {last}\n"
-        f"Можно скачать вручную: https://huggingface.co/{repo}/tree/main — файлы "
-        "config.json, preprocessor_config.json, model.bin, tokenizer.json, vocabulary.json — "
-        f"и положить их в папку {local}"
-    )
+    if voice.model_installed(name):
+        return str(voice.model_dir(name))
+    raise ModelDownloadError(voice.missing_model_message(name))
 
 
 def _patch_av() -> None:
@@ -114,20 +71,39 @@ def _patch_av() -> None:
     av.open = open_compat
 
 
+class NoLocalRecognition(Exception):
+    pass
+
+
 def load_model(name: str):
+    try:
+        import faster_whisper  # noqa: F401
+    except ImportError:
+        raise NoLocalRecognition(
+            "В этой сборке GM Whispers Core нет распознавания речи на компьютере. Варианты: включить в Craig тариф с готовой "
+            "расшифровкой (она лежит в архиве и подхватывается сама) или поставить Core из исходников: server\\setup.bat → "
+            "ответить «да» на вопрос про распознавание голоса."
+        )
     path = ensure_model(name)
-    _add_cuda_dlls()
     _patch_av()
     from faster_whisper import WhisperModel
 
-    try:
-        model = WhisperModel(path, device="cuda", compute_type="float16")
-        print(f"Модель {name} загружена на видеокарту.")
-        return model
-    except Exception as e:  # noqa: BLE001
-        print(f"!! Видеокарта недоступна ({str(e)[:300]}).")
-        print("   Перехожу на процессор — будет в разы медленнее. Пришли этот текст, разберёмся с CUDA.")
-        return WhisperModel(path, device="cpu", compute_type="int8")
+    threads = max(1, (os.cpu_count() or 2) - 1)
+    if voice.gpu_present() and voice.cuda_installed():
+        voice.add_cuda_dlls()
+        try:
+            model = WhisperModel(path, device="cuda", compute_type="float16")
+            print(f"Модель {name} загружена на видеокарту.")
+            return model
+        except Exception as e:  # noqa: BLE001
+            print(f"!! Видеокарта недоступна ({str(e)[:300]}).")
+            print("   Перехожу на процессор — будет в разы медленнее. Пришли этот текст в issues, разберёмся с CUDA.")
+    elif voice.gpu_present():
+        print("Видеокарта NVIDIA есть, но библиотеки CUDA не установлены — распознаю на процессоре. "
+              "Ускорение включается в Foundry: ⚙ → Транскрибация → «Ускорение на видеокарте».")
+    else:
+        print(f"Распознаю на процессоре ({threads} потоков) — это небыстро, можно оставить на ночь.")
+    return WhisperModel(path, device="cpu", compute_type="int8", cpu_threads=threads)
 
 
 def speaker_from_file(path: Path) -> str:
@@ -139,14 +115,15 @@ def speaker_from_file(path: Path) -> str:
 
 def load_speakers() -> dict:
     try:
-        return json.loads(SPEAKERS_PATH.read_text(encoding="utf-8"))
+        return json.loads(worlds.speakers_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
 
 def save_speakers(d: dict) -> None:
-    SPEAKERS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SPEAKERS_PATH.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    path = worlds.speakers_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def parse_start(info: str) -> int | None:
@@ -166,12 +143,14 @@ def parse_start(info: str) -> int | None:
 def vocabulary_prompt(limit: int = 70) -> str:
     """Подсказка распознаванию: имена NPC, мест и фракций из базы знаний + персонажи."""
     names: list[str] = []
-    kb_path = settings.kb_dir / "kb.json"
+    w = worlds.current() or worlds.for_transcribe()
+    kb_path = w.kb.path
     try:
         data = json.loads(kb_path.read_text(encoding="utf-8"))
         for p in data.get("pages", []):
             entry, page = p.get("entry", ""), p.get("page", "")
-            if entry.startswith("База НПС") or "фракции" in entry.lower() or entry.startswith("Квенты"):
+            # Короткие названия страниц из материалов ГМа и книги приключения — обычно имена NPC, мест, фракций.
+            if p.get("source") in ("gm", "adventure") and page and page != entry:
                 n = re.sub(r"^[^\wА-Яа-яЁё]+", "", page).strip()
                 if n and len(n) < 40 and n not in names:
                     names.append(n)
@@ -183,7 +162,15 @@ def vocabulary_prompt(limit: int = 70) -> str:
         m = re.search(r"\(([^)]+)\)", str(v))
         if m and m.group(1) not in names:
             names.insert(0, m.group(1))
-    base = "Настольная ролевая игра Dungeons & Dragons, кампания «Драккенхейм». Делириум, Хранители Пламени, Королева Воров."
+    from . import campaign
+
+    prof = campaign.load()
+    base = "Настольная ролевая игра"
+    if prof.get("system"):
+        base += f" {prof['system']}"
+    if prof.get("name"):
+        base += f", кампания «{prof['name']}»"
+    base += "."
     return base + (" Имена: " + ", ".join(names[:limit]) + "." if names else "")
 
 
@@ -361,9 +348,13 @@ def transcribe_tracks(model, tracks: list[Path], prompt: str, speakers: dict) ->
 
 
 def process_source(src: Path, session: str | None = None, start_text: str | None = None,
-                   model_name: str | None = None, local: bool = False, log=print) -> dict:
-    """Импорт записи Craig в сессию. Возвращает {"ok", "session", "lines", "source", "message"}."""
-    store = SessionStore()
+                   model_name: str | None = None, local: bool = False, log=print, world: str | None = None) -> dict:
+    """Импорт записи Craig в сессию мира world (пусто — последний мир, обращавшийся к серверу).
+    Возвращает {"ok", "session", "lines", "source", "message", "world"}."""
+    w = worlds.for_transcribe(world)
+    worlds.set_current(w)
+    store = w.store
+    log(f"Мир: {w.id or '(общие данные)'}")
     model_name = model_name or os.getenv("GMW_WHISPER_MODEL", "large-v3-turbo")
     with tempfile.TemporaryDirectory(prefix="gmw_craig_") as tmpd:
         tracks, info, craig_tr = collect_audio(src, Path(tmpd))
@@ -418,7 +409,7 @@ def process_source(src: Path, session: str | None = None, start_text: str | None
                                                     "at": int(time.time() * 1000)}), flush=True)
             try:
                 model = load_model(model_name)
-            except ModelDownloadError as e:
+            except (ModelDownloadError, NoLocalRecognition) as e:
                 return {"ok": False, "message": str(e)}
             lines = transcribe_tracks(model, tracks, prompt, speakers)
             source = f"craig:{src.name}"
@@ -428,7 +419,7 @@ def process_source(src: Path, session: str | None = None, start_text: str | None
             for raw in new:
                 speakers[raw] = raw
             save_speakers(speakers)
-            log(f"Новые участники добавлены в {SPEAKERS_PATH.name}: {', '.join(new)}")
+            log(f"Новые участники добавлены в {worlds.speakers_path().name}: {', '.join(new)}")
             log('   Впиши там, кто есть кто, например "dimko": "Дима (ГМ)", "lera_m": "Лера (Мира)".')
 
     lines = sorted(lines + notes, key=lambda x: x["off"])
@@ -438,13 +429,14 @@ def process_source(src: Path, session: str | None = None, start_text: str | None
     out = store._dir(sid) / "transcript.txt"
     msg = f"{len(lines)} реплик{f' (из них заметок /note: {len(notes)})' if notes else ''} → {out}"
     log("Готово: " + msg)
-    return {"ok": True, "session": sid, "lines": len(lines), "source": source, "message": msg}
+    return {"ok": True, "session": sid, "lines": len(lines), "source": source, "message": msg, "world": w.id}
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Расшифровка записи Craig для GM Whispers")
     ap.add_argument("source", help="zip-архив Craig или папка с дорожками")
-    ap.add_argument("--session", help="id сессии (папка в data/sessions); по умолчанию — по времени записи")
+    ap.add_argument("--session", help="id сессии (папка sessions мира); по умолчанию — по времени записи")
+    ap.add_argument("--world", help="id мира Foundry (папка в data/worlds); по умолчанию — последний мир, обращавшийся к серверу")
     ap.add_argument("--start", help="время начала записи, если в архиве нет info.txt: «2026-10-07 19:00»")
     ap.add_argument("--model", default=os.getenv("GMW_WHISPER_MODEL", "large-v3-turbo"))
     ap.add_argument("--local", action="store_true", help="распознать заново на видеокарте, даже если в архиве есть расшифровка Craig")
@@ -455,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Не найдено: {src}")
         return 1
     t0 = time.time()
-    res = process_source(src, args.session, args.start, args.model, args.local)
+    res = process_source(src, args.session, args.start, args.model, args.local, world=args.world)
     print("GMW_RESULT " + json.dumps(res, ensure_ascii=False), flush=True)
     if not res["ok"]:
         print(f"\n!! {res['message']}")

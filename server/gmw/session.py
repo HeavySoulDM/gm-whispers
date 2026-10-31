@@ -13,8 +13,7 @@ from .advisor import TOOLS, collect_citations, make_tools
 from .kb import KnowledgeBase
 from .llm import model_for, run_tool_loop
 from .filters import chat_ignored, load_ignore, voice_ignored
-from .sessions import SessionStore
-from .config import SPEAKERS_PATH
+from . import worlds
 from .usage import Usage
 
 SUMMARY_SYSTEM = """Ты — летописец кампании и помощник мастера. Пишешь итоги сыгранной сессии для «Дневника кампании». Читает только мастер, спойлеры допустимы.
@@ -82,7 +81,7 @@ def _hhmm(ts: int) -> str:
 
 def _speakers() -> dict:
     try:
-        return json.loads(SPEAKERS_PATH.read_text(encoding="utf-8"))
+        return json.loads(worlds.speakers_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
@@ -179,7 +178,7 @@ async def summarize(
 
     stats = {"events": 0, "voice": 0, "messages": len(messages)}
     if session_id:
-        store = SessionStore()
+        store = worlds.current_store()
         events = store.load_events(session_id)
         tr = store.load_transcript(session_id)
         # Если журнал событий пуст (сессия до установки модуля) — берём присланный чат.

@@ -7,6 +7,7 @@ import { gatherContext } from "./context.js";
 import { collectAllPages, kbSyncState } from "./kbsync.js";
 import { tacticalSnapshot } from "./tactics.js";
 import { esc, renderMarkdown } from "./md.js";
+import { completeHandout, createHandoutEntry, handoutHTML, handoutsOf, showHandout, splitHandouts } from "./handouts.js";
 import { openSummaryDialog } from "./session.js";
 import { openPrepDialog } from "./prep.js";
 import { bibleEntry, buildBible, getBible, guessQuentaFolder, openOrBuildBible } from "./bible.js";
@@ -77,8 +78,14 @@ function pendingHTML(it) {
   return html + "</div>";
 }
 
-export function renderAnswer(md, citations = []) {
-  return renderMarkdown(md, { citations });
+/** Ответ советника: обычный markdown, а блоки раздаток — отдельными карточками (с кнопками, если передан it/idx). */
+export function renderAnswer(md, citations = [], { it, idx } = {}) {
+  const parts = splitHandouts(md);
+  if (parts.length === 1 && parts[0].text != null) return renderMarkdown(md, { citations });
+  let h = 0;
+  return parts.map(p => p.text != null
+    ? renderMarkdown(p.text, { citations })
+    : handoutHTML(completeHandout(p.handout, it?.question ?? ""), idx != null ? { idx, hidx: h, uuid: it?.handouts?.[h++]?.uuid } : {})).join("");
 }
 
 /** Лента ответов: одна на вкладку браузера (закрыл панель — ответы не пропали) и копия в localStorage на случай F5.
@@ -132,6 +139,8 @@ export class AdvisorPanel extends ApplicationV2 {
       moreExamples: AdvisorPanel.#onMoreExamples,
       toggleExamples: AdvisorPanel.#onToggleExamples,
       toChat: AdvisorPanel.#onToChat,
+      handoutJournal: AdvisorPanel.#onHandoutJournal,
+      handoutShow: AdvisorPanel.#onHandoutShow,
       openSettings: AdvisorPanel.#onOpenSettings,
       openSetup: AdvisorPanel.#onOpenSetup,
     },
@@ -167,11 +176,22 @@ export class AdvisorPanel extends ApplicationV2 {
       };
       this._notifyCraig(h.craig);
       this._autoBuildKb(h);
+      this._checkVersion(h.version);
     } catch (err) {
       this.status = { state: "bad", text: err.message, kb: this.status.kb ?? null, craig: null };
     }
     // Перерисовываем только при изменениях, чтобы не сбивать набор вопроса.
     if (this.rendered && JSON.stringify(this.status) !== before) this.render();
+  }
+
+  /** Модуль и сервер обновляются отдельно: при расхождении версий — одно предупреждение за сеанс. */
+  _checkVersion(serverVersion) {
+    const mine = game.modules.get(MODULE_ID)?.version ?? "";
+    if (!serverVersion || !mine || serverVersion === mine || this._versionWarned) return;
+    this._versionWarned = true;
+    const [a, b] = [mine, serverVersion].map(v => v.split(".").map(Number));
+    const serverOlder = a[0] > b[0] || (a[0] === b[0] && a[1] > b[1]) || (a[0] === b[0] && a[1] === b[1] && a[2] > b[2]);
+    ui.notifications.warn(T(serverOlder ? "GMW.Panel.ServerOlder" : "GMW.Panel.ModuleOlder", { module: mine, server: serverVersion }), { permanent: true });
   }
 
   /** База собирается сама: при первом запуске (сервер и ключ есть, база пуста) и после смены источников в настройках.
@@ -263,7 +283,7 @@ export class AdvisorPanel extends ApplicationV2 {
     } else if (it.error) {
       body = `<div class="gmw-error"><i class="fas fa-triangle-exclamation"></i> ${esc(it.error)}</div>`;
     } else {
-      body = `<div class="gmw-a">${renderAnswer(it.answer, it.citations)}</div>`;
+      body = `<div class="gmw-a">${renderAnswer(it.answer, it.citations, { it, idx })}</div>`;
       if (it.citations?.length) {
         body += `<ol class="gmw-cites">${it.citations.map(c =>
           `<li><a data-action="openCite" data-uuid="${esc(c.uuid)}">${esc(c.title)}</a> <span class="gmw-src">${esc(c.source)}</span></li>`).join("")}</ol>`;
@@ -520,6 +540,36 @@ export class AdvisorPanel extends ApplicationV2 {
     if (!doc) return ui.notifications.warn(T("GMW.Panel.PageNotFound"));
     if (doc.documentName === "JournalEntryPage") return doc.parent.sheet.render({ force: true, pageId: doc.id });
     return doc.sheet?.render({ force: true });
+  }
+
+  /** Раздатка → журнал (скрытый от игроков). Один раз на карточку: повторное нажатие открывает уже созданный. */
+  async _handoutEntry(target) {
+    const it = this.items[Number(target.dataset.index)];
+    const hidx = Number(target.dataset.handout);
+    const h = handoutsOf(it?.answer ?? "", it?.question ?? "")[hidx];
+    if (!h) return null;
+    it.handouts ??= [];
+    const known = it.handouts[hidx]?.uuid ? await fromUuid(it.handouts[hidx].uuid) : null;
+    if (known) return known;
+    const entry = await createHandoutEntry(h, { question: it.question });
+    it.handouts[hidx] = { uuid: entry.uuid, name: entry.name };
+    feedStore.save();
+    this.render();
+    return entry;
+  }
+
+  static async #onHandoutJournal(_event, target) {
+    const entry = await this._handoutEntry(target);
+    if (!entry) return;
+    ui.notifications.info(T("GMW.Handout.Created", { name: entry.name }));
+    entry.sheet?.render(true);
+  }
+
+  static async #onHandoutShow(_event, target) {
+    const entry = await this._handoutEntry(target);
+    if (!entry) return;
+    await showHandout(entry);
+    ui.notifications.info(T("GMW.Handout.Shown", { name: entry.name }));
   }
 
   static async #onToChat(_event, target) {

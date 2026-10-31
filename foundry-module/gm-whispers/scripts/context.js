@@ -1,4 +1,5 @@
 import { stripHtml as stripHtmlSafe } from "./api.js";
+import { worldLanguages } from "./handouts.js";
 import { kindFor } from "./kbsync.js";
 import { statblock } from "./tactics.js";
 
@@ -169,5 +170,6 @@ export function gatherContext({ includeScene = true, tokens = null } = {}) {
     combat: combatContext(),
     tokens: sceneTokens(scene),
     selected: selected.slice(0, 6).map(t => tokenInfo(t.document ?? t, { withBio: true })),
+    languages: worldLanguages(),
   };
 }

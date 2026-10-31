@@ -8,6 +8,7 @@ import { T, TList } from "./i18n.js";
 
 /** Пункты — в lang/*.json: GMW.Changelog.<версия через _>.<n> (items читаются при показе, когда переводы уже загружены). */
 export const CHANGELOG = [
+  { version: "0.3.3", key: "GMW.Changelog.0_3_3" },
   { version: "0.3.2", key: "GMW.Changelog.0_3_2" },
   { version: "0.3.0", key: "GMW.Changelog.0_3_0" },
   { version: "0.2.0", key: "GMW.Changelog.0_2_0" },

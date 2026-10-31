@@ -254,3 +254,82 @@
 .gmw-wizard-root .gmw-dot-title { color: var(--gmw-muted); margin-right: 6px; }
 .gmw-wizard-root .gmw-dot-title.active { color: inherit; font-weight: 600; }
 .gmw-wizard-root .gmw-step { min-height: 120px; }
+
+/* Отступы содержимого окон настроек и мастера от краёв; поле из двух элементов (список + «Другая…») */
+.gmw-settings-root { padding: 6px 12px 10px; }
+.gmw-settings-root .gmw-stack > * + * { margin-top: 4px; }
+.gmw-wizard-root .gmw-step { padding: 0 2px; }
+
+/* Раздатки: текст для игроков, который советник оформил отдельным блоком */
+.gm-whispers .gmw-handout {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(190, 160, 100, 0.55);
+  border-left-width: 4px;
+  border-radius: 4px;
+  background: rgba(190, 160, 100, 0.08);
+}
+.gm-whispers .gmw-handout-title { font-weight: bold; margin-bottom: 4px; }
+.gm-whispers .gmw-handout-body { font-style: italic; }
+.gm-whispers .gmw-handout-body p { margin: 0 0 6px; }
+.gm-whispers .gmw-handout-actions { margin-top: 6px; display: flex; gap: 14px; font-size: 0.9em; }
+.gm-whispers .gmw-handout-actions a { cursor: pointer; }
+.gmw-chat .gmw-handout { font-size: 0.95em; }
+
+:root { --gmw-paper-l: 73%; --gmw-paper-wear: 0.5; } /* тон и потёртость бумаги; переопределяются из настроек (applyHandoutTheme) */
+
+/* Оформление раздаток по типу — страница журнала. Это «бумага» на столе: непрозрачный фон, тёмный текст,
+   поэтому одинаково читается в светлой и тёмной теме. Шрифты — из поставки Foundry (Amiri, Modesto Condensed, Signika).
+   Отключается галочкой в ⚙ → Кампания; тон и потёртость — ползунками там же. В ленте панели не применяется. */
+.gmw-ho {
+  padding: 26px 34px; margin: 8px 0; line-height: 1.55; color: #2b2012;
+  box-shadow: inset 0 0 80px rgba(90, 60, 15, calc(0.45 * var(--gmw-paper-wear))), 0 2px 10px rgba(0, 0, 0, 0.4);
+  background:
+    radial-gradient(ellipse at 18% 22%, rgba(120, 85, 30, calc(0.3 * var(--gmw-paper-wear))), transparent 45%),
+    radial-gradient(ellipse at 82% 70%, rgba(120, 85, 30, calc(0.34 * var(--gmw-paper-wear))), transparent 50%),
+    radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(95, 65, 20, calc(0.55 * var(--gmw-paper-wear))) 100%),
+    linear-gradient(180deg, hsl(40 42% calc(var(--gmw-paper-l) + 4%)), hsl(39 40% var(--gmw-paper-l)));
+  border: 1px solid hsl(38 40% calc(var(--gmw-paper-l) - 35%));
+}
+.gmw-ho p { margin: 0 0 0.85em; color: inherit; }
+.gmw-ho strong, .gmw-ho em { color: inherit; }
+.gmw-ho .gmw-ho-title { text-align: center; margin: 0 0 16px; border: 0; color: inherit; }
+.gmw-ho-letter, .gmw-ho-note, .gmw-ho-diary { font-family: "Amiri", "Modesto Condensed", Georgia, serif; font-size: 1.18em; }
+.gmw-ho-letter p:first-child { font-size: 1.05em; }
+.gmw-ho-letter p:last-child { text-align: right; font-style: italic; margin-top: 1.3em; }
+.gmw-ho-note { font-style: italic; padding: 18px 24px; transform: rotate(-0.5deg); border-style: dashed; max-width: 85%; margin-left: auto; margin-right: auto; }
+.gmw-ho-diary {
+  background-image:
+    repeating-linear-gradient(180deg, transparent 0 1.5em, rgba(100, 70, 25, 0.28) 1.5em 1.55em),
+    radial-gradient(ellipse at 50% 50%, transparent 60%, rgba(95, 65, 20, calc(0.5 * var(--gmw-paper-wear))) 100%),
+    linear-gradient(180deg, hsl(40 38% calc(var(--gmw-paper-l) + 4%)), hsl(39 36% var(--gmw-paper-l)));
+  line-height: 1.55em;
+}
+.gmw-ho-notice {
+  font-family: "Signika", sans-serif;
+  text-align: center;
+  border: 4px double #5a3c14;
+  outline: 1px solid hsl(38 40% calc(var(--gmw-paper-l) - 30%));
+  outline-offset: -10px;
+}
+.gmw-ho-notice .gmw-ho-title { font-family: "Modesto Condensed", serif; font-size: 2em; letter-spacing: 0.08em; text-transform: uppercase; }
+.gmw-ho-prophecy {
+  font-family: "Amiri", Georgia, serif;
+  font-style: italic;
+  font-size: 1.2em;
+  text-align: center;
+  background: radial-gradient(ellipse at center, #2b2240, #130d1f);
+  color: #e8dcc0;
+  border: 1px solid #c8aa5a;
+  text-shadow: 0 0 8px rgba(255, 220, 140, 0.3);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+.gmw-ho-document {
+  font-family: "Signika", sans-serif;
+  color: #2a2620;
+  background-image:
+    radial-gradient(ellipse at 50% 50%, transparent 65%, rgba(90, 70, 30, calc(0.35 * var(--gmw-paper-wear))) 100%),
+    linear-gradient(180deg, hsl(42 30% calc(var(--gmw-paper-l) + 10%)), hsl(40 30% calc(var(--gmw-paper-l) + 5%)));
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+.gmw-settings-root .gmw-sliders input[type="range"] { width: 100%; }

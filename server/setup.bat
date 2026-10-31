@@ -19,7 +19,7 @@ echo Создаю рабочее окружение (.venv) ...
 if errorlevel 1 goto venvfail
 
 :deps
-echo Устанавливаю зависимости (1-3 минуты) ...
+echo Устанавливаю зависимости, включая движок распознавания речи (3-5 минут, ~300 МБ) ...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet
 if errorlevel 1 goto pipfail
@@ -27,20 +27,8 @@ echo Готово: сервер установлен.
 echo.
 
 :audio
-echo Распознавание голоса (записи Discord через бота Craig) работает на видеокарте NVIDIA
-echo и требует скачать около 3 ГБ (библиотеки CUDA и модель распознавания).
-echo Можно пропустить и включить позже: server\setup_audio.bat и tools\download_model.bat.
-set "ANS="
-set /p "ANS=Поставить распознавание голоса сейчас? [y/N]: "
-if /i not "%ANS%"=="y" goto done
-echo Устанавливаю faster-whisper и библиотеки CUDA (~1.5 ГБ) ...
-".venv\Scripts\python.exe" -m pip install "faster-whisper>=1.1" "nvidia-cublas-cu12" "nvidia-cudnn-cu12>=9,<10" --quiet
-if errorlevel 1 (
-  echo Не удалось поставить распознавание. Сервер при этом работает; попробуй позже: server\setup_audio.bat
-  goto done
-)
-echo Скачиваю модель распознавания (~1.6 ГБ, с докачкой при обрыве) ...
-call "%~dp0..\tools\download_model.bat" /quiet
+rem Движок распознавания речи (faster-whisper, работает на процессоре) ставится вместе с зависимостями.
+rem Модель (0,5-3 ГБ) и ускорение на видеокарте NVIDIA скачиваются по кнопке в Foundry: ⚙ → Транскрибация.
 goto done
 
 :done

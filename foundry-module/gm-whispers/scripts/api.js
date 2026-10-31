@@ -22,6 +22,11 @@ export class ServerError extends Error {
   }
 }
 
+/** Заголовки каждого запроса: код доступа и id мира — сервер хранит базу, профиль кампании и сессии отдельно для каждого мира. */
+function headers() {
+  return { "Content-Type": "application/json", "X-GMW-Token": token(), "X-GMW-World": globalThis.game?.world?.id ?? "" };
+}
+
 export async function request(path, { method = "GET", body, timeout = 180000 } = {}) {
   if (!token()) throw new ServerError(T("GMW.Api.NoToken"), 401);
   const ctrl = new AbortController();
@@ -30,7 +35,7 @@ export async function request(path, { method = "GET", body, timeout = 180000 } =
   try {
     res = await fetch(serverUrl() + path, {
       method,
-      headers: { "Content-Type": "application/json", "X-GMW-Token": token() },
+      headers: headers(),
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: ctrl.signal,
     });
@@ -61,7 +66,7 @@ export async function askStream(payload, onEvent, { timeout = 190000 } = {}) {
   try {
     res = await fetch(serverUrl() + "/ask/stream", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-GMW-Token": token() },
+      headers: headers(),
       body: JSON.stringify(payload),
       signal: ctrl.signal,
     });

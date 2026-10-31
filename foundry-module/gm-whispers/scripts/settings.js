@@ -10,6 +10,7 @@ import { MODULE_ID, ServerError, request } from "./api.js";
 import { esc } from "./md.js";
 import { bibleEntry, bibleEntryName, buildBible, guessQuentaFolder, quentaFolders } from "./bible.js";
 import { openPanel } from "./panel.js";
+import { applyHandoutTheme, polyglotActive } from "./handouts.js";
 import { T } from "./i18n.js";
 
 const { ApplicationV2 } = foundry.applications.api;
@@ -105,6 +106,9 @@ export class ServerSettingsApp extends ApplicationV2 {
       buildBible: ServerSettingsApp.#onBuildBible,
       openBible: ServerSettingsApp.#onOpenBible,
       openSetup: ServerSettingsApp.#onOpenSetup,
+      installVoice: ServerSettingsApp.#onInstallVoice,
+      voiceRecheck: ServerSettingsApp.#onVoiceRecheck,
+      voiceOpenFolder: ServerSettingsApp.#onVoiceOpenFolder,
     },
   };
 
@@ -120,12 +124,17 @@ export class ServerSettingsApp extends ApplicationV2 {
     this.saving = false;
     this.tab = "connect";      // активная вкладка
     this.keyProvider = null;   // какой сервис показан в блоке «Ключ API»
+    this.voice = null;         // ответ GET /voice/status (что установлено для распознавания)
+    this._voiceTimer = null;
   }
 
   async load() {
     this.error = null;
     try {
+      const voiceP = request("/voice/status", { timeout: 15000 }).catch(() => null);
       this.data = await request("/settings", { timeout: 10000 });
+      this.voice = await voiceP;
+      if (this.voice?.job?.state === "running") this._pollVoice();
       if (!Object.values(this.data.keys ?? {}).some(k => k.set)) this.tab = "connect";
       this.speakers = Object.entries(this.data.speakers ?? {}).map(([key, name]) => ({ key, name }));
       // Текущие модели всегда есть в списках, даже до проверки ключа.
@@ -213,8 +222,8 @@ export class ServerSettingsApp extends ApplicationV2 {
       <div class="gmw-grid gmw-two">
         <div class="gmw-field"><label>${T("GMW.Settings.CampName")}</label><input type="text" name="camp_name" value="${esc(c.name ?? "")}" placeholder="Dungeons of Drakkenheim"><p class="hint">${T("GMW.Settings.CampNameHint")}</p></div>
         <div class="gmw-field"><label>${T("GMW.Settings.CampSystem")}</label>
-          <select name="camp_system_sel">${sysOpts}</select>
-          <input type="text" name="camp_system" value="${esc(ch.other)}" placeholder="${esc(T("GMW.Settings.CampSystemPlaceholder"))}" ${ch.sel === "other" ? "" : "hidden"}>
+          <div class="gmw-stack"><select name="camp_system_sel">${sysOpts}</select>
+          <input type="text" name="camp_system" value="${esc(ch.other)}" placeholder="${esc(T("GMW.Settings.CampSystemPlaceholder"))}" ${ch.sel === "other" ? "" : "hidden"}></div>
           <p class="hint">${T("GMW.Settings.CampSystemHint", { system: esc(sys || "—") })}</p></div>
       </div>
       <div class="gmw-field"><label>${T("GMW.Settings.CampDesc")}</label><textarea name="camp_description" rows="3" placeholder="${esc(T("GMW.Settings.CampDescPlaceholder"))}">${esc(c.description ?? "")}</textarea><p class="hint">${T("GMW.Settings.CampDescHint")}</p></div>
@@ -320,6 +329,135 @@ export class ServerSettingsApp extends ApplicationV2 {
       <div class="gmw-packs">${packRows}</div>`;
   }
 
+  /* ------------------------------------------------------------ распознавание на компьютере */
+
+  /** Блок «Распознавание на компьютере»: что установлено, выбор модели, ускорение на видеокарте, кнопка скачивания. */
+  _voiceHTML() {
+    const v = this.voice;
+    if (!v) return `<p class="hint">${T("GMW.Voice.NoStatus")}</p>`;
+    if (!v.available) return `<p class="hint gmw-bad">${T("GMW.Voice.Unavailable")}</p>`;
+    const lang = game.i18n.lang.startsWith("ru") ? "ru" : "en";
+    const cur = this._field("whisper_model")?.value || v.model;
+    const state = v.modelInstalled
+      ? `<span class="gmw-ok">${T("GMW.Voice.StateReady", { model: esc(v.model), device: v.device === "cuda" ? T("GMW.Voice.DeviceGpu") : T("GMW.Voice.DeviceCpu", { threads: v.cpuThreads }) })}</span>`
+      : `<span class="gmw-bad">${T("GMW.Voice.StateNone", { model: esc(v.model) })}</span>`;
+    const opts = v.models.map(m => `<option value="${esc(m.name)}" ${m.name === cur ? "selected" : ""}>${esc(m.name)} · ${T("GMW.Voice.Gb", { gb: m.gb })}${m.installed ? ` · ✓ ${T("GMW.Voice.Installed")}` : ` · ${T("GMW.Voice.NotInstalled")}`}${m.default ? ` · ${T("GMW.Voice.Recommended")}` : ""}</option>`).join("");
+    const cuda = v.gpu
+      ? (v.cuda
+        ? `<p class="hint gmw-ok">✓ ${T("GMW.Voice.CudaDone")}</p>`
+        : `<label class="gmw-check"><input type="checkbox" name="voice_cuda" checked> ${T("GMW.Voice.Cuda", { gb: v.cudaGb })}</label><p class="hint">${T("GMW.Voice.CudaHint")}</p>`)
+      : `<p class="hint">${T("GMW.Voice.CpuHint")}</p>`;
+    return `
+      <p class="hint">${T("GMW.Voice.Intro")}</p>
+      <p>${state}</p>
+      <div class="gmw-field"><label>${T("GMW.Voice.Model")}</label>
+        <select name="whisper_model">${opts}</select>
+        <p class="hint" id="gmw-voice-desc">${esc(v.models.find(m => m.name === cur)?.[lang] ?? "")}</p></div>
+      ${cuda}
+      <div id="gmw-voice-action">${this._voiceActionHTML()}</div>`;
+  }
+
+  /** Под списком моделей: инструкция, куда положить файлы (если выбранной нет), кнопка ускорения и ход установки CUDA. */
+  _voiceActionHTML() {
+    const v = this.voice;
+    if (!v?.available) return "";
+    const job = v.job;
+    let out = "";
+    const cur = this._field("whisper_model")?.value || v.model;
+    const m = v.models.find(x => x.name === cur);
+    if (m && !m.installed) {
+      out += `<div class="gmw-voice-howto">
+        <p class="hint">${T("GMW.Voice.HowTo", { gb: m.gb })}</p>
+        <p><code>${esc(m.dir)}</code></p>
+        <p class="hint">${T("GMW.Voice.HowToFiles")} <a href="https://huggingface.co/${esc(m.repo)}/tree/main" target="_blank" rel="noopener">huggingface.co/${esc(m.repo)}</a>. ${T("GMW.Voice.HowToVpn")}</p>
+        <p><a data-action="voiceOpenFolder"><i class="fas fa-folder-open"></i> ${T("GMW.Voice.OpenFolder")}</a> &nbsp; <a data-action="voiceRecheck"><i class="fas fa-rotate"></i> ${T("GMW.Voice.Recheck")}</a></p>
+      </div>`;
+    } else if (m?.installed && cur !== v.model) {
+      out += `<p class="hint">${T("GMW.Voice.SaveToApply")}</p>`;
+    }
+    if (job?.state === "running") {
+      return out + `<div class="gmw-bar"><div style="width:${job.pct}%"></div></div>
+        <p class="hint">${T("GMW.Voice.Progress", { message: esc(job.message), pct: job.pct, done: job.done_mb, total: job.total_mb })}</p>`;
+    }
+    if (job?.state === "error") out += `<p class="hint gmw-bad">${T("GMW.Voice.Error", { message: esc(job.message) })} <span class="gmw-muted">${T("GMW.Voice.Log")}</span></p>`;
+    else if (job?.state === "done") out += `<p class="hint gmw-ok">${T("GMW.Voice.Done")}</p>`;
+    const wantCuda = v.gpu && !v.cuda && (this._field("voice_cuda")?.checked ?? true);
+    if (wantCuda) out += `<button type="button" data-action="installVoice"><i class="fas fa-download"></i> ${T("GMW.Voice.InstallCuda", { gb: v.cudaGb })}</button>`;
+    return out;
+  }
+
+  _refreshVoiceAction() {
+    const box = this.element?.querySelector("#gmw-voice-action");
+    if (box) box.innerHTML = this._voiceActionHTML();
+    const desc = this.element?.querySelector("#gmw-voice-desc");
+    if (desc && this.voice) {
+      const lang = game.i18n.lang.startsWith("ru") ? "ru" : "en";
+      const cur = this._field("whisper_model")?.value;
+      desc.textContent = this.voice.models.find(m => m.name === cur)?.[lang] ?? "";
+    }
+  }
+
+  /** Пока идёт установка — раз в 2 с спрашиваем ход; по окончании перечитываем состояние и перерисовываем блок. */
+  _pollVoice() {
+    if (this._voiceTimer) return;
+    this._voiceTimer = setInterval(async () => {
+      try {
+        const v = await request("/voice/status", { timeout: 15000 });
+        const was = this.voice?.job?.state;
+        this.voice = v;
+        this._refreshVoiceAction();
+        if (v.job?.state !== "running") {
+          clearInterval(this._voiceTimer); this._voiceTimer = null;
+          if (was === "running") {
+            if (v.job?.state === "done") ui.notifications.info(T("GMW.Voice.CudaDone"));
+            else if (v.job?.state === "error") ui.notifications.error(T("GMW.Voice.Error", { message: v.job.message }));
+            await this._rerender();
+          }
+        }
+      } catch (_) { /* сервер недоступен — попробуем на следующем тике */ }
+    }, 2000);
+  }
+
+  static async #onInstallVoice() {
+    const v = this.voice;
+    if (!v) return;
+    const cuda = !!(v.gpu && !v.cuda && (this._field("voice_cuda")?.checked ?? true));
+    try {
+      const res = await request("/voice/install", { method: "POST", body: { cuda }, timeout: 20000 });
+      if (res.started) {
+        ui.notifications.info(T("GMW.Voice.Started"));
+        this.voice = { ...v, job: res.job };
+        this._refreshVoiceAction();
+        this._pollVoice();
+      } else {
+        ui.notifications.info(res.message ?? "");
+        await ServerSettingsApp.#onVoiceRecheck.call(this);
+      }
+    } catch (err) {
+      ui.notifications.error(T("GMW.Voice.Error", { message: err.message }));
+    }
+  }
+
+  /** Перечитать, какие модели лежат в папке (после того как мастер положил файлы). */
+  static async #onVoiceRecheck() {
+    try {
+      this.voice = await request("/voice/status", { timeout: 15000 });
+      await this._rerender();
+      if (this.voice?.modelInstalled) ui.notifications.info(T("GMW.Voice.Found", { model: this.voice.model }));
+    } catch (err) {
+      ui.notifications.error(err.message);
+    }
+  }
+
+  static async #onVoiceOpenFolder() {
+    try {
+      const res = await request("/voice/open-folder", { method: "POST", timeout: 10000 });
+      ui.notifications.info(T("GMW.Voice.FolderOpened", { path: res.path }));
+    } catch (err) {
+      ui.notifications.error(err.message);
+    }
+  }
+
   _speakersRows() {
     if (!this.speakers.length) return `<p class="hint">${T("GMW.Settings.SpeakersEmpty")}</p>`;
     return `<table class="gmw-table"><thead><tr><th>${T("GMW.Settings.ColNick")}</th><th>${T("GMW.Settings.ColName")}</th><th></th></tr></thead><tbody>
@@ -419,6 +557,24 @@ export class ServerSettingsApp extends ApplicationV2 {
       <fieldset>
         <legend><i class="fas fa-book"></i> ${T("GMW.Settings.BibleLegend")}</legend>
         ${this._bibleHTML()}
+      </fieldset>
+      <fieldset>
+        <legend><i class="fas fa-scroll"></i> ${T("GMW.Settings.HandoutLegend")}</legend>
+        <p class="hint">${T("GMW.Settings.HandoutIntro")}</p>
+        <label class="gmw-check"><input type="checkbox" name="handout_style" ${game.settings.get(MODULE_ID, "handoutStyle") ? "checked" : ""}> ${T("GMW.Settings.HandoutStyle")}</label>
+        <p class="hint">${T("GMW.Settings.HandoutStyleHint")}</p>
+        <div class="gmw-grid gmw-two gmw-sliders">
+          <div class="gmw-field"><label>${T("GMW.Settings.HandoutTone")}</label>
+            <input type="range" name="handout_tone" min="0" max="100" value="${Number(game.settings.get(MODULE_ID, "handoutTone"))}">
+            <p class="hint">${T("GMW.Settings.HandoutToneHint")}</p></div>
+          <div class="gmw-field"><label>${T("GMW.Settings.HandoutWear")}</label>
+            <input type="range" name="handout_wear" min="0" max="100" value="${Number(game.settings.get(MODULE_ID, "handoutWear"))}">
+            <p class="hint">${T("GMW.Settings.HandoutWearHint")}</p></div>
+        </div>
+        ${polyglotActive()
+          ? `<label class="gmw-check"><input type="checkbox" name="handout_polyglot" ${game.settings.get(MODULE_ID, "handoutPolyglot") ? "checked" : ""}> ${T("GMW.Settings.HandoutPolyglot")}</label>
+             <p class="hint">${T("GMW.Settings.HandoutPolyglotHint")}</p>`
+          : `<p class="hint gmw-muted">${T("GMW.Settings.HandoutPolyglotMissing")}</p>`}
       </fieldset>`)}
       ${section("voice", `
       <fieldset>
@@ -435,6 +591,10 @@ export class ServerSettingsApp extends ApplicationV2 {
             <select name="whisper_language">${(() => { const cur = d.whisper_language || "ru"; const opts = SPEECH_LANGS.some(([v]) => v === cur) ? SPEECH_LANGS.map(([v, k]) => [v, T(k)]) : [...SPEECH_LANGS.map(([v, k]) => [v, T(k)]), [cur, cur]]; return opts.map(([v, t]) => `<option value="${v}" ${v === cur ? "selected" : ""}>${t}</option>`).join(""); })()}</select>
             <p class="hint">${T("GMW.Settings.SpeechLangHint")}</p></div>
         </div>
+      </fieldset>
+      <fieldset>
+        <legend><i class="fas fa-microchip"></i> ${T("GMW.Voice.Legend")}</legend>
+        ${this._voiceHTML()}
       </fieldset>
       <fieldset>
         <legend><i class="fas fa-users"></i> ${T("GMW.Settings.SpeakersLegend")}</legend>
@@ -479,6 +639,12 @@ export class ServerSettingsApp extends ApplicationV2 {
     if (!this.data && !this.error) this.load();
   }
 
+  _onClose(options) {
+    if (this._voiceTimer) { clearInterval(this._voiceTimer); this._voiceTimer = null; }
+    applyHandoutTheme(); // не сохранённые движения ползунков — назад к сохранённым
+    return super._onClose?.(options);
+  }
+
   _onRender() {
     this.element.querySelector('select[name="key_provider"]')?.addEventListener("change", (ev) => {
       this.keyProvider = ev.target.value;
@@ -488,6 +654,15 @@ export class ServerSettingsApp extends ApplicationV2 {
       const other = this.element.querySelector('input[name="camp_system"]');
       if (other) { other.hidden = ev.target.value !== "other"; if (!other.hidden) other.focus(); }
     });
+    this.element.querySelector('select[name="whisper_model"]')?.addEventListener("change", () => this._refreshVoiceAction());
+    this.element.querySelector('input[name="voice_cuda"]')?.addEventListener("change", () => this._refreshVoiceAction());
+    if (this.voice) this._refreshVoiceAction(); // кнопка считается по полям формы — после перерисовки пересчитать
+    // Ползунки бумаги: открытый журнал меняется сразу, пока двигаешь; закрепляется кнопкой «Сохранить».
+    for (const name of ["handout_tone", "handout_wear"]) {
+      this.element.querySelector(`input[name="${name}"]`)?.addEventListener("input", () => {
+        applyHandoutTheme({ tone: this._field("handout_tone")?.value, wear: this._field("handout_wear")?.value });
+      });
+    }
     // Ввод в поле ключа снимает пометку «удалить».
     for (const p of Object.keys(PROVIDERS)) {
       this.element.querySelector(`input[name="key-${p}"]`)?.addEventListener("input", () => {
@@ -545,7 +720,7 @@ export class ServerSettingsApp extends ApplicationV2 {
       openai_reasoning_fast: this._field("openai_reasoning_fast")?.value,
       craig_inbox: this._field("craig_inbox")?.value.trim() ?? "",
       craig_auto: !!this._field("craig_auto")?.checked,
-      whisper_model: this._field("whisper_model")?.value.trim() || undefined, // в окне поля нет — значение в .env не трогаем
+      whisper_model: this._field("whisper_model")?.value.trim() || undefined, // поля нет (сервер без /voice/status) — значение в .env не трогаем
       whisper_language: this._field("whisper_language")?.value.trim().toLowerCase() || "ru",
       sessions_keep_days: this._field("cleanup_on")?.checked ? Math.max(1, Number(this._field("sessions_keep_days")?.value) || 90) : 0,
       allowed_origins: this._field("allowed_origins")?.value.trim() ?? "",
@@ -641,7 +816,7 @@ export class ServerSettingsApp extends ApplicationV2 {
   /** Вернуть в форму набранные, но не сохранённые значения после перерисовки. */
   _restore(keep, typedKey, provider) {
     if (typedKey) { const f = this._field(`key-${provider}`); if (f) f.value = typedKey; }
-    for (const [name, val] of [["craig_inbox", keep.craig_inbox], ["whisper_language", keep.whisper_language], ["allowed_origins", keep.allowed_origins], ["ignore_voice", keep.ignore?.voice], ["ignore_chat", keep.ignore?.chat], ["custom_name", keep.custom_name], ["custom_base_url", keep.custom_base_url], ["custom_model", keep.custom_model]]) {
+    for (const [name, val] of [["craig_inbox", keep.craig_inbox], ["whisper_language", keep.whisper_language], ["whisper_model", keep.whisper_model], ["allowed_origins", keep.allowed_origins], ["ignore_voice", keep.ignore?.voice], ["ignore_chat", keep.ignore?.chat], ["custom_name", keep.custom_name], ["custom_base_url", keep.custom_base_url], ["custom_model", keep.custom_model]]) {
       const f = this._field(name); if (f && typeof val === "string") f.value = val;
     }
     const auto = this._field("craig_auto"); if (auto && typeof keep.craig_auto === "boolean") auto.checked = keep.craig_auto;
@@ -761,6 +936,10 @@ export class ServerSettingsApp extends ApplicationV2 {
       await game.settings.set(MODULE_ID, "kbSources", this._collectSources());
       await game.settings.set(MODULE_ID, "kbPacks", this._collectPacks());
       await game.settings.set(MODULE_ID, "bibleQuentaFolder", this._field("bible_folder")?.value ?? "");
+      if (this._field("handout_style")) await game.settings.set(MODULE_ID, "handoutStyle", !!this._field("handout_style").checked);
+      if (this._field("handout_polyglot")) await game.settings.set(MODULE_ID, "handoutPolyglot", !!this._field("handout_polyglot").checked);
+      if (this._field("handout_tone")) await game.settings.set(MODULE_ID, "handoutTone", Number(this._field("handout_tone").value));
+      if (this._field("handout_wear")) await game.settings.set(MODULE_ID, "handoutWear", Number(this._field("handout_wear").value));
       const sourcesChanged = before !== JSON.stringify([game.settings.get(MODULE_ID, "kbSources"), game.settings.get(MODULE_ID, "kbPacks")]);
       this.sources = null;
       const res = await request("/settings", { method: "POST", body, timeout: 20000 });

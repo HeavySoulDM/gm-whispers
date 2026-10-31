@@ -51,8 +51,12 @@ function push(kind, text, extra = {}) {
   if (queue.length >= 40) flush();
 }
 
+let backoffUntil = 0;   // после неудачи не стучимся в выключенный сервер каждые 10 с: пауза растёт до 5 минут
+let backoffMs = 0;
+
 export async function flush() {
   if (flushing || !queue.length) return;
+  if (Date.now() < backoffUntil) return;
   flushing = true;
   const batch = queue.slice(0, 200);
   try {
@@ -60,9 +64,12 @@ export async function flush() {
     queue = queue.slice(batch.length);
     loggerState.sent += batch.length;
     loggerState.lastError = null;
+    backoffMs = 0;
     persist();
   } catch (err) {
     loggerState.lastError = err.message;
+    backoffMs = Math.min(backoffMs ? backoffMs * 2 : 30000, 300000);
+    backoffUntil = Date.now() + backoffMs;
   } finally {
     loggerState.pending = queue.length;
     flushing = false;

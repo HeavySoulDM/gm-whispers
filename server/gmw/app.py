@@ -12,16 +12,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import __version__, advisor, bible, prep, session, settings_store
+from . import __version__, advisor, bible, prep, session, settings_store, voice, worlds
 from .config import settings
 from .inbox import CraigInbox
-from .kb import KINDS, KnowledgeBase
+from .kb import KINDS
 from .llm import DEFAULT_MODELS, PROVIDERS, LLMError, has_key, list_models, model_for, provider_for, reset_clients
-from .sessions import SessionStore
 from .usage import usage_summary
+from .worlds import World
 
-kb = KnowledgeBase(settings.kb_dir)
-store = SessionStore()
 inbox = CraigInbox(settings.craig_inbox, settings.craig_auto)
 _kb_lock = asyncio.Lock()      # одно изменение базы за раз
 ASK_TIMEOUT = 170               # с: чуть меньше таймаута модуля (180), чтобы сервер не тратил токены впустую
@@ -33,9 +31,10 @@ async def _housekeeping() -> None:
         try:
             days = settings.sessions_keep_days
             if days > 0:
-                done = await asyncio.to_thread(store.archive_old, days)
-                if done:
-                    print(f"[sessions] в архив (старше {days} дн.): {', '.join(done)}")
+                for w in [worlds.get(wid) for wid in worlds.known_ids()] + [worlds.get("")]:
+                    done = await asyncio.to_thread(w.store.archive_old, days)
+                    if done:
+                        print(f"[sessions] {w.id or 'общие'}: в архив (старше {days} дн.): {', '.join(done)}")
         except Exception as e:  # noqa: BLE001
             print(f"[sessions] очистка не удалась: {e}")
         await asyncio.sleep(24 * 3600)
@@ -43,11 +42,13 @@ async def _housekeeping() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    worlds.migrate_on_start()
     inbox.start()
     task = asyncio.create_task(_housekeeping())
     yield
     task.cancel()
-    kb.flush()  # отложенные изменения базы — на диск
+    for w in worlds.loaded():
+        w.kb.flush()  # отложенные изменения базы — на диск
 
 
 app = FastAPI(title="GM Whispers Core", version=__version__, lifespan=lifespan)
@@ -81,6 +82,14 @@ async def private_network(request: Request, call_next):
 def auth(x_gmw_token: str = Header(default="")) -> None:
     if not x_gmw_token or not secrets.compare_digest(x_gmw_token, settings.local_token):
         raise HTTPException(status_code=401, detail="Неверный код доступа. Скопируй его из окна сервера (GMW_LOCAL_TOKEN в server/.env) в настройки модуля: ⚙ → Подключение.")
+
+
+async def world(x_gmw_world: str = Header(default="")) -> World:
+    """Данные мира, от которого пришёл запрос (заголовок X-GMW-World). Без заголовка — общие, как до разделения.
+    Делает мир «текущим» на время запроса: профиль кампании, словарь говорящих, сессии берутся из его папки."""
+    w = await asyncio.to_thread(worlds.get, x_gmw_world)
+    worlds.set_current(w)
+    return w
 
 
 class PageIn(BaseModel):
@@ -180,6 +189,11 @@ class SettingsIn(BaseModel):
     campaign: dict[str, str | bool] | None = None
 
 
+class VoiceInstallIn(BaseModel):
+    model: str | None = None   # какую модель сделать текущей (файлы пользователь кладёт в data/models сам)
+    cuda: bool = False         # докачать библиотеки CUDA для видеокарты NVIDIA
+
+
 class ModelsIn(BaseModel):
     provider: str = "anthropic"
     api_key: str | None = None   # проверить ещё не сохранённый ключ
@@ -208,12 +222,13 @@ async def index():
 
 
 @app.get("/health", dependencies=[Depends(auth)])
-async def health():
+async def health(w: World = Depends(world)):
     lore = model_for("lore")
     return {
         "ok": True,
         "version": __version__,
-        "kb": kb.stats(),
+        "world": w.id,
+        "kb": w.kb.stats(),
         "models": _models_status(),
         "provider": provider_for(lore),
         "apiKey": has_key(lore),
@@ -226,7 +241,7 @@ async def health():
 # ---------------------------------------------------------------- настройки
 
 
-@app.get("/settings", dependencies=[Depends(auth)])
+@app.get("/settings", dependencies=[Depends(auth), Depends(world)])
 async def settings_get():
     return {**settings_store.public(), "resolved": _models_status(),
             "kinds": {k: v["label"] for k, v in KINDS.items()},
@@ -234,7 +249,7 @@ async def settings_get():
             "providers": {p: {"title": v["title"], "base_url": v.get("base_url")} for p, v in PROVIDERS.items()}}
 
 
-@app.post("/settings", dependencies=[Depends(auth)])
+@app.post("/settings", dependencies=[Depends(auth), Depends(world)])
 async def settings_post(body: SettingsIn):
     try:
         out = await asyncio.to_thread(settings_store.apply, body.model_dump(exclude_none=True))
@@ -261,21 +276,53 @@ async def settings_models(body: ModelsIn):
     return {"provider": provider, "models": ids, "defaults": DEFAULT_MODELS[provider]}
 
 
+# ---------------------------------------------------------------- распознавание речи
+
+
+@app.get("/voice/status", dependencies=[Depends(auth)])
+async def voice_status():
+    """Что установлено для распознавания на компьютере и ход текущей установки."""
+    return await asyncio.to_thread(voice.status)
+
+
+@app.post("/voice/install", dependencies=[Depends(auth)])
+async def voice_install(body: VoiceInstallIn):
+    """Сделать модель текущей и/или докачать библиотеки CUDA в фоне; ход — в GET /voice/status → job."""
+    if body.model:
+        if body.model not in {m["name"] for m in voice.MODELS}:
+            raise HTTPException(400, f"Неизвестная модель: {body.model}")
+        await asyncio.to_thread(settings_store.apply, {"whisper_model": body.model})
+    try:
+        res = await asyncio.to_thread(voice.start_install, body.cuda)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return {**res, "model": voice.current_model(), "modelInstalled": voice.model_installed(voice.current_model())}
+
+
+@app.post("/voice/open-folder", dependencies=[Depends(auth)])
+async def voice_open_folder():
+    """Открыть папку моделей в проводнике на компьютере мастера (сервер и Foundry — на одной машине)."""
+    try:
+        return {"path": await asyncio.to_thread(voice.open_models_dir)}
+    except OSError as e:
+        raise HTTPException(500, f"Не удалось открыть папку: {e}")
+
+
 # ---------------------------------------------------------------- база знаний
 
 
 @app.post("/kb/import", dependencies=[Depends(auth)])
-async def kb_import(body: ImportIn):
+async def kb_import(body: ImportIn, w: World = Depends(world)):
     async with _kb_lock:
-        stats = await asyncio.to_thread(kb.rebuild, [p.model_dump() for p in body.pages], body.world)
-    print(f"[kb] база обновлена: {stats.get('pages')} страниц, {stats.get('chunks')} фрагментов")
+        stats = await asyncio.to_thread(w.kb.rebuild, [p.model_dump() for p in body.pages], body.world or w.id)
+    print(f"[kb] {w.id or 'общие'}: база обновлена: {stats.get('pages')} страниц, {stats.get('chunks')} фрагментов")
     return stats
 
 
 @app.post("/kb/upsert", dependencies=[Depends(auth)])
-async def kb_upsert(body: UpsertIn):
+async def kb_upsert(body: UpsertIn, w: World = Depends(world)):
     async with _kb_lock:
-        stats = await asyncio.to_thread(kb.upsert, [p.model_dump() for p in body.pages])
+        stats = await asyncio.to_thread(w.kb.upsert, [p.model_dump() for p in body.pages])
     print(f"[kb] обновлено страниц: {len(body.pages)}; всего фрагментов {stats.get('chunks')}")
     return stats
 
@@ -284,7 +331,8 @@ async def kb_upsert(body: UpsertIn):
 
 
 @app.post("/ask", dependencies=[Depends(auth)])
-async def ask(body: AskIn):
+async def ask(body: AskIn, w: World = Depends(world)):
+    kb = w.kb
     q = body.question.strip()
     if not q:
         raise HTTPException(400, "Пустой вопрос")
@@ -304,11 +352,12 @@ async def ask(body: AskIn):
 
 
 @app.post("/ask/stream", dependencies=[Depends(auth)])
-async def ask_stream(body: AskIn):
+async def ask_stream(body: AskIn, w: World = Depends(world)):
     """То же, что /ask, но ответ приходит по мере генерации: строки JSON (NDJSON).
     {"type":"status","text"} · {"type":"delta","text"} · {"type":"reset"} · {"type":"done", ...результат /ask} · {"type":"error","message"}"""
     from fastapi.responses import StreamingResponse
 
+    kb = w.kb
     q = body.question.strip()
     if not q:
         raise HTTPException(400, "Пустой вопрос")
@@ -366,7 +415,8 @@ async def ask_stream(body: AskIn):
 
 
 @app.post("/session/summarize", dependencies=[Depends(auth)])
-async def session_summarize(body: SummaryIn):
+async def session_summarize(body: SummaryIn, w: World = Depends(world)):
+    kb = w.kb
     if not body.session and not body.messages and not body.notes.strip():
         raise HTTPException(400, "Нет ни сообщений чата за период, ни заметок мастера.")
     if not has_key(model_for("lore")):
@@ -381,8 +431,9 @@ async def session_summarize(body: SummaryIn):
 
 
 @app.post("/session/prep", dependencies=[Depends(auth)])
-async def session_prep(body: PrepIn):
+async def session_prep(body: PrepIn, w: World = Depends(world)):
     """«К игре»: сводка перед сессией."""
+    kb = w.kb
     if not kb.chunks:
         raise HTTPException(409, "База знаний пуста — она соберётся сама через минуту; если нет, нажми «Пересобрать базу» в настройках.")
     if not has_key(model_for("lore")):
@@ -399,8 +450,9 @@ async def session_prep(body: PrepIn):
 
 
 @app.post("/bible/build", dependencies=[Depends(auth)])
-async def bible_build(body: BibleBuildIn):
+async def bible_build(body: BibleBuildIn, w: World = Depends(world)):
     """Первая версия Библии кампании по квентам, партии и итогам."""
+    kb = w.kb
     if not has_key(model_for("lore")):
         raise HTTPException(409, "Ключ API не задан. Открой настройки (⚙) в панели GM Whispers и впиши ключ.")
     try:
@@ -414,7 +466,7 @@ async def bible_build(body: BibleBuildIn):
 
 
 @app.post("/bible/update", dependencies=[Depends(auth)])
-async def bible_update(body: BibleUpdateIn):
+async def bible_update(body: BibleUpdateIn, _w: World = Depends(world)):
     """Новое «Текущее положение» после итогов сессии."""
     if not has_key(model_for("lore")):
         raise HTTPException(409, "Ключ API не задан.")
@@ -429,17 +481,18 @@ async def bible_update(body: BibleUpdateIn):
 
 
 @app.post("/session/events", dependencies=[Depends(auth)])
-async def session_events(body: EventsIn):
-    return {"ok": True, "sessions": await asyncio.to_thread(store.append_events, body.events)}
+async def session_events(body: EventsIn, w: World = Depends(world)):
+    return {"ok": True, "sessions": await asyncio.to_thread(w.store.append_events, body.events)}
 
 
 @app.get("/session/list", dependencies=[Depends(auth)])
-async def session_list():
-    return {"sessions": (await asyncio.to_thread(store.list))[:30]}
+async def session_list(w: World = Depends(world)):
+    return {"sessions": (await asyncio.to_thread(w.store.list))[:30]}
 
 
 @app.post("/session/{sid}/transcript", dependencies=[Depends(auth)])
-async def session_transcript(sid: str, body: TranscriptIn):
+async def session_transcript(sid: str, body: TranscriptIn, w: World = Depends(world)):
+    store = w.store
     if sid == "new":
         sid = store.session_for(body.start or int(time.time() * 1000))
     try:
@@ -456,7 +509,7 @@ async def session_transcript(sid: str, body: TranscriptIn):
 
 
 @app.get("/craig/pending", dependencies=[Depends(auth)])
-async def craig_pending(fresh: bool = False):
+async def craig_pending(fresh: bool = False, _w: World = Depends(world)):
     """Новые записи в папке. Обход диска кэшируется; ?fresh=1 — посмотреть заново."""
     if not inbox.enabled:
         return {"enabled": False, "pending": [], "jobs": []}
@@ -470,7 +523,8 @@ async def craig_jobs():
 
 
 @app.post("/craig/sync", dependencies=[Depends(auth)])
-async def craig_sync():
+async def craig_sync(w: World = Depends(world)):
+    """Забрать новые записи в сессии мира, из которого нажали кнопку."""
     if not inbox.enabled:
         raise HTTPException(400, "Папка записей Craig не задана. Открой настройки (⚙) → Транскрибация.")
-    return await inbox.sync()
+    return await inbox.sync(w.id)

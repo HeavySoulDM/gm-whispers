@@ -29,15 +29,11 @@ ROOT = Path(__file__).resolve().parent.parent
 MODULE_ID = "gm-whispers"
 
 # Что НЕ попадает в релиз сервера.
-SERVER_EXCLUDE_DIRS = {".venv", "__pycache__", "data", "dist", "build"}
-SERVER_EXCLUDE_FILES = {".env", "gmw_core.spec", "start_tray.bat", "start_quiet.vbs"}  # spec — для exe; трей и тихий запуск в релиз не идут (решение 18.10: сервер запускают вручную)
-# Личные конфиги → пустые образцы.
-CONFIG_TEMPLATES = {
-    "campaign.json": {"name": "", "system": "", "description": "", "tone": "", "special_rules": "", "lang": "auto",
-                      "answer_length": "normal", "lines_only": "0", "no_improv": "0", "player_names": "0"},
-    "speakers.json": {"_comment": "Кто есть кто в записи Craig: ник → подпись. Заполняется в Foundry: ⚙ Настройки сервера → Голос."},
-    "ignore.json": {"_comment": "Что не учитывать в итогах. Заполняется в Foundry: ⚙ Настройки сервера → Голос.", "voice": ["kenku"], "chat": []},
-}
+SERVER_EXCLUDE_DIRS = {".venv", "__pycache__", "data", "dist", "build"}  # dist — exe, упаковывается отдельно ниже
+SERVER_EXCLUDE_FILES = {".env", "gmw_core.spec", "start_tray.bat", "start_quiet.vbs", "setup_audio.bat"}  # setup_audio — модель и CUDA теперь ставятся из Foundry  # spec — для exe; трей и тихий запуск в релиз не идут (решение 18.10: сервер запускают вручную)
+# Личные конфиги в релиз не идут: с 0.3.3 профиль кампании, словарь говорящих и исключения лежат
+# у каждого мира в data/worlds/<мир>/ и создаются сервером сами.
+PERSONAL_CONFIGS = {"campaign.json", "speakers.json", "ignore.json"}
 TOOLS_INCLUDE = {"download_model.bat", "link_module.bat"}  # autostart в релиз не идёт — запуск только вручную
 
 
@@ -128,8 +124,8 @@ def main() -> int:
     srv_src = ROOT / "server"
     srv_dst = out / "GM_Whispers_Core" / "server"
     copytree(srv_src, srv_dst, skip_dirs=SERVER_EXCLUDE_DIRS, skip_files=SERVER_EXCLUDE_FILES)
-    for name, tpl in CONFIG_TEMPLATES.items():
-        (srv_dst / "config" / name).write_text(json.dumps(tpl, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    for name in PERSONAL_CONFIGS:
+        (srv_dst / "config" / name).unlink(missing_ok=True)
     # eval.json — пример с пометкой
     ev = srv_dst / "config" / "eval.json"
     if ev.exists():
@@ -156,6 +152,26 @@ def main() -> int:
     else:
         warnings.append("Нет README.md — в релизе нет инструкции для пользователей.")
     zip_dir(out / "GM_Whispers_Core", out / f"GM_Whispers_Core-v{version}.zip", "GM_Whispers_Core")
+
+    # --- exe-вариант сервера (если собран tools\build_exe.bat или в CI): без Python, без распознавания речи
+    exe_src = ROOT / "server" / "dist" / "GM Whispers Core"
+    if (exe_src / "GM Whispers Core.exe").exists():
+        exe_dst = out / "GM_Whispers_Core_exe"
+        copytree(exe_src, exe_dst / "GM Whispers Core")
+        for name in ("LICENSE", "README.md", "README.en.md"):
+            if (ROOT / name).exists():
+                shutil.copy2(ROOT / name, exe_dst / name)
+        (exe_dst / "ЗАПУСК.txt").write_text(
+            "GM Whispers Core (сервер помощника мастера) — версия без установки Python.\n\n"
+            "1. Запусти «GM Whispers Core\\GM Whispers Core.exe» — откроется окно с адресом и кодом доступа.\n"
+            "2. В Foundry включи модуль GM Whispers и пройди мастер настройки (он спросит код доступа).\n"
+            "3. Окно сервера держи открытым во время игры; закрыть — Ctrl+C или крестик.\n\n"
+            "Рядом с exe появятся .env (ключи и код доступа) и config\\; данные кампаний — в папке data рядом с папкой exe.\n"
+            "Распознавание голоса: модель и ускорение на видеокарте скачиваются из Foundry (⚙ → Транскрибация).\n",
+            encoding="utf-8")
+        zip_dir(exe_dst, out / f"GM_Whispers_Core_exe-v{version}.zip", "GM_Whispers_Core_exe")
+    else:
+        warnings.append("exe-вариант не собран (server/dist/GM Whispers Core/ нет) — запусти tools\\build_exe.bat, если он нужен в релизе.")
 
     # --- проверка на личные данные
     leaks = []

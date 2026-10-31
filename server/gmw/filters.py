@@ -1,19 +1,20 @@
 """Что не учитывать в итогах: музыкальные боты в записи голоса и служебные сообщения модулей в чате.
 
-Список в server/config/ignore.json — совпадение по части имени, регистр не важен.
+Список свой у каждого мира (data/worlds/<мир>/ignore.json, см. worlds.py) — совпадение по части имени, регистр не важен.
 """
 
 from __future__ import annotations
 
 import json
 
-from .config import IGNORE_PATH
+from . import worlds
+
 DEFAULT = {"voice": ["kenku"], "chat": ["Подсказки"]}
 
 
 def load_ignore() -> dict:
     try:
-        data = json.loads(IGNORE_PATH.read_text(encoding="utf-8"))
+        data = json.loads(worlds.ignore_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return dict(DEFAULT)
     return {k: [str(x) for x in data.get(k, []) if str(x).strip()] for k in ("voice", "chat")}

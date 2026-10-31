@@ -20,8 +20,27 @@ ROOT_DIR = SERVER_DIR.parent
 DATA_DIR = ROOT_DIR / "data"
 ENV_PATH = SERVER_DIR / ".env"
 SOURCES_PATH = SERVER_DIR / "config" / "sources.json"
-SPEAKERS_PATH = SERVER_DIR / "config" / "speakers.json"
-IGNORE_PATH = SERVER_DIR / "config" / "ignore.json"
+# campaign.json, speakers.json, ignore.json — у каждого мира свои, см. worlds.py
+
+
+def _unpack_bundled() -> None:
+    """exe-версия: при первом запуске положить рядом с exe образцы config/sources.json и .env.example из сборки."""
+    bundle = Path(getattr(sys, "_MEIPASS", "")) if FROZEN else None
+    if not bundle or not bundle.exists():
+        return
+    import shutil
+
+    for rel in ("config/sources.json", ".env.example"):
+        src, dst = bundle / rel, SERVER_DIR / rel
+        if src.exists() and not dst.exists():
+            try:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+            except OSError:
+                pass
+
+
+_unpack_bundled()
 
 load_dotenv(ENV_PATH, override=False)
 
@@ -90,10 +109,6 @@ class Settings:
     discord_guild_id: str = field(default_factory=lambda: os.getenv("DISCORD_GUILD_ID", "").strip())
     discord_voice_channel_id: str = field(default_factory=lambda: os.getenv("DISCORD_TEST_VOICE_CHANNEL_ID", "").strip())
     discord_owner_id: str = field(default_factory=lambda: os.getenv("DISCORD_OWNER_ID", "").strip())
-
-    @property
-    def kb_dir(self) -> Path:
-        return DATA_DIR / "kb"
 
     @property
     def logs_dir(self) -> Path:

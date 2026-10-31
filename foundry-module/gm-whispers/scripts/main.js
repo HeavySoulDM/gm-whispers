@@ -10,6 +10,7 @@
  *   game.gmWhispers.bible()      // Библия кампании: открыть или собрать; bible(true) — пересобрать
  */
 
+import { applyHandoutTheme } from "./handouts.js";
 import { MODULE_ID, askHotkey, autoBuildKnowledgeOnReady, openPanel, refreshKnowledge } from "./panel.js";
 import { showWhatsNew } from "./changelog.js";
 import { openSummaryDialog } from "./session.js";
@@ -53,6 +54,11 @@ Hooks.once("init", () => {
 
   // Мастер первого запуска пройден (или мир был настроен до его появления).
   game.settings.register(MODULE_ID, "setupDone", { scope: "world", config: false, type: Boolean, default: false });
+  // Раздатки: своё оформление страницы (письмо/записка/объявление…) и языки мира через модуль Polyglot. Галочки — в ⚙ → Кампания.
+  game.settings.register(MODULE_ID, "handoutStyle", { scope: "world", config: false, type: Boolean, default: true });
+  game.settings.register(MODULE_ID, "handoutPolyglot", { scope: "world", config: false, type: Boolean, default: false });
+  game.settings.register(MODULE_ID, "handoutTone", { scope: "world", config: false, type: Number, default: 50, onChange: () => applyHandoutTheme() });
+  game.settings.register(MODULE_ID, "handoutWear", { scope: "world", config: false, type: Number, default: 50, onChange: () => applyHandoutTheme() });
 
   game.settings.register(MODULE_ID, "lastSummaryAt", {
     scope: "world", config: false, type: Number, default: 0,
@@ -103,6 +109,7 @@ Hooks.once("init", () => {
 });
 
 Hooks.once("ready", () => {
+  applyHandoutTheme(); // тон бумаги раздаток — у всех клиентов, игроки тоже видят страницы
   if (!game.user.isGM) return;
   registerLogger();
   registerKbSync();

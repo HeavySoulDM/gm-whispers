@@ -1,5 +1,6 @@
-"""Запуск: python -m gmw (консоль, start.bat), python -m gmw --tray (значок в трее, без окна),
-python -m gmw --transcribe <архив> (то же, что -m gmw.transcribe; нужно собранному exe)."""
+"""Запуск: python -m gmw или «GM Whispers Core.exe» (консоль: адрес, код доступа, Ctrl+C — остановить),
+--tray (значок в трее, без окна; по умолчанию не используется — решение 18.10: сервер запускают вручную),
+--transcribe <архив> (то же, что -m gmw.transcribe; нужно собранному exe)."""
 
 import sys
 
@@ -28,9 +29,7 @@ def main(argv: list[str] | None = None) -> int:
         from .transcribe import main as transcribe_main
 
         return transcribe_main(argv[1:])
-    from .config import FROZEN
-
-    if argv[:1] == ["--tray"] or (FROZEN and not argv):
+    if argv[:1] == ["--tray"]:
         try:
             from .tray import run_tray
         except ImportError as e:
@@ -40,7 +39,16 @@ def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
     banner()
-    uvicorn.run("gmw.app:app", host=settings.host, port=settings.port, log_level="warning")
+    try:
+        uvicorn.run("gmw.app:app", host=settings.host, port=settings.port, log_level="warning")
+    except SystemExit:
+        raise
+    except Exception as e:  # noqa: BLE001 — в exe без консоли ошибку иначе не увидеть
+        print(f"\nСервер не запустился: {type(e).__name__}: {e}")
+        if "address already in use" in str(e).lower() or "10048" in str(e):
+            print(f"Порт {settings.port} занят — возможно, сервер уже запущен в другом окне.")
+        input("Нажми Enter, чтобы закрыть окно...")
+        return 1
     return 0
 
 

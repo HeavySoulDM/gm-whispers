@@ -1,6 +1,6 @@
 """Хранилище сессий: события Foundry, расшифровка голоса, загруженные тексты.
 
-data/sessions/<id>/
+data/worlds/<мир>/sessions/<id>/ (старая раскладка — data/sessions/)
   meta.json            — первое/последнее событие, счётчики
   events.jsonl         — события из Foundry (чат, бой, ХП, сцены, добыча), пишет модуль в реальном времени
   transcript.json/.txt — расшифровка голоса (Craig → transcribe.bat) или загруженный текст

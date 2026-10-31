@@ -1,6 +1,6 @@
 """Профиль кампании: название, система, мир, тон, особые правила, язык ответов.
 
-Хранится в server/config/campaign.json, правится из окна «Настройки сервера». Из него собирается
+Хранится отдельно для каждого мира (data/worlds/<мир>/campaign.json, см. worlds.py), правится из окна «Настройки сервера». Из него собирается
 общий блок для всех промптов — чтобы модуль работал с любой кампанией, а не только с одной.
 """
 
@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import json
 
-from .config import SERVER_DIR
-
-CAMPAIGN_PATH = SERVER_DIR / "config" / "campaign.json"
+from . import worlds
 
 DEFAULT = {
     "name": "",
@@ -38,7 +36,7 @@ LANG_NAMES = {"ru": "русский", "en": "English", "uk": "українськ
 
 def load() -> dict:
     try:
-        data = json.loads(CAMPAIGN_PATH.read_text(encoding="utf-8"))
+        data = json.loads(worlds.campaign_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
     out = dict(DEFAULT)
@@ -64,10 +62,11 @@ def save(data: dict) -> dict:
         cur["answer_length"] = "normal"
     if cur["lang"] and cur["lang"] != "auto" and not cur["lang"].isalpha():
         cur["lang"] = "auto"
-    CAMPAIGN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CAMPAIGN_PATH.with_suffix(".tmp")
+    path = worlds.campaign_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(cur, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(CAMPAIGN_PATH)
+    tmp.replace(path)
     return cur
 
 
